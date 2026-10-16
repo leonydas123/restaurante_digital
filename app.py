@@ -27,7 +27,7 @@ if st.session_state['modo_admin']:
         st.rerun()
         
     st.divider()
-    st.subheader("📊 Gestão Operacional, Caixa e Dívidas")
+    st.subheader("📊 Caixa e Dívidas")
     
     # Abas de gestão dentro da área do administrador
     aba_adm1, aba_adm2, aba_adm3 = st.tabs(["Pedidos Recebidos", "Controlo de Dívidas", "Caixa do Dia"])
@@ -44,7 +44,7 @@ if st.session_state['modo_admin']:
         st.write("### Registo de Clientes Fiados / Dívidas")
         with st.form("form_divida"):
             cliente_divida = st.text_input("Nome do Cliente")
-            valor_divida = st.number_input("Valor em Dívida (€ / R$)", min_format=0.0, format="%.2f")
+            valor_divida = st.number_input("Valor em Dívida (€ / R$)", format="%.2f")
             btn_add_divida = st.form_submit_button("Registar Dívida")
             
             if btn_add_divida:
