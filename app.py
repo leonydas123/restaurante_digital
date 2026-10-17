@@ -56,6 +56,16 @@ def init_db():
             observacao TEXT
         )
     """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS donos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT,
+            cargo TEXT,
+            contato TEXT,
+            observacoes TEXT
+        )
+    """)
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS pedidos (
@@ -189,6 +199,28 @@ def deletar_fornecedor(id_forn):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM fornecedores WHERE id = ?", (id_forn,))
+    conn.commit()
+    conn.close()
+
+# DONOS / PROPRIETÁRIOS
+def carregar_donos():
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT * FROM donos ORDER BY id DESC", conn)
+    conn.close()
+    return df.to_dict("records")
+
+def salvar_dono(nome, cargo, contato, obs):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO donos (nome, cargo, contato, observacoes) VALUES (?, ?, ?, ?)",
+                   (nome, cargo, contato, obs))
+    conn.commit()
+    conn.close()
+
+def deletar_dono(id_dono):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM donos WHERE id = ?", (id_dono,))
     conn.commit()
     conn.close()
 
@@ -387,7 +419,7 @@ if st.session_state.modo_admin:
     st.markdown("""
         <div class='app-header'>
             <h1>🔒 Painel de Gestão & Administração</h1>
-            <p>Controle do cardápio, recepção de pedidos, estoque, fornecedores e fechamento financeiro.</p>
+            <p>Controle do cardápio, recepção de pedidos, estoque, fornecedores, donos e fechamento financeiro.</p>
         </div>
     """, unsafe_allow_html=True)
     
@@ -397,11 +429,12 @@ if st.session_state.modo_admin:
 
     st.divider()
 
-    admin_tab1, admin_tab2, admin_tab3, admin_tab5, admin_tab4 = st.tabs([
+    admin_tab1, admin_tab2, admin_tab3, admin_tab5, admin_tab6, admin_tab4 = st.tabs([
         "⚙️ Cardápio & Preços", 
         "📋 Pedidos & Comandas", 
         "📦 Estoque & Conciliação",
         "🤝 Fornecedores",
+        "👑 Área dos Donos",
         "📊 Fechamento de Caixa"
     ])
     
@@ -534,7 +567,7 @@ if st.session_state.modo_admin:
                         st.rerun()
                 st.markdown("---")
 
-    # ABA RESTAURADA: FORNECEDORES
+    # ABA: FORNECEDORES
     with admin_tab5:
         st.markdown("#### 🤝 Gestão de Fornecedores")
         with st.form("form_novo_fornecedor"):
@@ -573,6 +606,50 @@ if st.session_state.modo_admin:
                 with col_lf4:
                     if st.button("🗑️", key=f"del_forn_{forn['id']}"):
                         deletar_fornecedor(forn['id'])
+                        st.rerun()
+                st.markdown("---")
+
+    # ABA RESTAURADA: ÁREA DOS DONOS
+    with admin_tab6:
+        st.markdown("#### 👑 Área Exclusiva dos Proprietários")
+        st.info("Espaço reservado para cadastro de sócios, diretoria e notas estratégicas do negócio.")
+        
+        with st.form("form_novo_dono"):
+            st.markdown("##### ➕ Cadastrar Proprietário / Sócio")
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                nome_dono = st.text_input("Nome do Proprietário / Sócio:")
+                cargo_dono = st.text_input("Cargo / Função (ex: Sócio-Fundador, Gerente Geral):")
+            with col_d2:
+                contato_dono = st.text_input("Telefone / WhatsApp Direto:")
+                obs_dono = st.text_input("Observações / Percentual de Participação:")
+                
+            if st.form_submit_button("💾 Cadastrar Proprietário", type="primary"):
+                if not nome_dono:
+                    st.error("Informe o nome do proprietário.")
+                else:
+                    salvar_dono(nome_dono, cargo_dono, contato_dono, obs_dono)
+                    st.success("Proprietário cadastrado com sucesso!")
+                    st.rerun()
+
+        st.divider()
+        st.markdown("##### 📋 Proprietários Cadastrados")
+        lista_donos = carregar_donos()
+        if not lista_donos:
+            st.info("Nenhum proprietário registrado até o momento.")
+        else:
+            for dono in lista_donos:
+                col_ld1, col_ld2, col_ld3, col_ld4 = st.columns([3, 2, 3, 1])
+                with col_ld1:
+                    st.write(f"• **{dono['nome']}**")
+                    st.caption(f"Cargo: {dono['cargo']}")
+                with col_ld2:
+                    st.write(f"📱 {dono['contato']}")
+                with col_ld3:
+                    st.write(f"📝 {dono['observacoes']}")
+                with col_ld4:
+                    if st.button("🗑️", key=f"del_dono_{dono['id']}"):
+                        deletar_dono(dono['id'])
                         st.rerun()
                 st.markdown("---")
 
