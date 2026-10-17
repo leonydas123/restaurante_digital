@@ -63,6 +63,12 @@ def init_db():
         )
     """)
 
+    # Atualização automática da tabela de pedidos caso a coluna não exista no banco antigo
+    try:
+        cursor.execute("ALTER TABLE pedidos ADD COLUMN estoque_baixado INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass # A coluna já existe
+
     cursor.execute("SELECT COUNT(*) FROM configuracoes")
     if cursor.fetchone()[0] == 0:
         menu_padrao = {
@@ -167,7 +173,7 @@ def salvar_pedido(data_ped, cliente, telefone, horario, pedido_str, total, pagam
     cursor.execute("""
         INSERT INTO pedidos (data, cliente, telefone, horario_retirada, pedido, total, pagamento, nota_info, estado, estoque_baixado)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendente', 0)
-    """, (str(data_ped), cliente, telefone, horario, pedido_str, total, pagamento, nota_info))
+    """, (str(data_ped), str(cliente), str(telefone), str(horario), str(pedido_str), float(total), str(pagamento), str(nota_info)))
     conn.commit()
     conn.close()
 
@@ -221,7 +227,6 @@ def processar_fala_inteligente(texto_fala, preco_marmita_base, precos_sucos_dict
     itens_extraidos = []
     texto = texto_fala.lower()
     
-    # 1. Busca por Suco / Bebida no texto
     preco_suco_encontrado = 0.0
     suco_desc = ""
     
@@ -243,11 +248,10 @@ def processar_fala_inteligente(texto_fala, preco_marmita_base, precos_sucos_dict
         itens_extraidos.append({
             "quantidade": 1,
             "item_principal": suco_desc,
-            "detalhes": "Adicionado via Pedido por Áudio",
+            "detalhes": "Adicionado via Pedido Inteligente",
             "preco": preco_suco_encontrado
         })
 
-    # 2. Contagem Inteligente de Marmitas
     qtd_marmitas = 0
     if "duas" in texto or "2" in texto or "outro" in texto or "outra" in texto:
         qtd_marmitas = 2
@@ -258,7 +262,6 @@ def processar_fala_inteligente(texto_fala, preco_marmita_base, precos_sucos_dict
     else:
         qtd_marmitas = 1
 
-    # Quebra o texto por frases para separar os detalhes de cada marmita
     partes = re.split(r'e|uma|outra|\,', texto)
     partes_marmitas = [p.strip() for p in partes if ("costela" in p or "carne" in p or "feijão" in p or "marmita" in p or "salada" in p)]
     
@@ -399,13 +402,20 @@ if st.session_state.modo_admin:
         st.markdown("#### 💰 Preço Padrão da Refeição")
         preco_marmita_novo = st.number_input("Preço Padrão (R$):", value=float(menu_diario["preco_marmita"]), step=1.00)
         
+        st.divider()
+        st.markdown("#### 🧃 Gestão de Preços de Sucos")
+        novos_precos_sucos = {}
+        for chave_suco, preco_atual in precos_sucos.items():
+            novos_precos_sucos[chave_suco] = st.number_input(f"Preço ({chave_suco}) (R$):", min_value=0.0, value=float(preco_atual), step=0.50)
+
         if st.button("💾 Salvar Alterações do Cardápio", type="primary"):
             menu_diario["carnes"] = [c.strip() for c in novas_carnes.split(",") if c.strip()]
             menu_diario["tipos_arroz"] = [r.strip() for r in novos_tipos_arroz.split(",") if r.strip()]
             menu_diario["acompanhamentos_padrao"] = [a.strip() for a in novos_acompanhamentos.split(",") if a.strip()]
             menu_diario["preco_marmita"] = preco_marmita_novo
             salvar_config("menu_diario", menu_diario)
-            st.success("✨ Cardápio atualizado com sucesso!")
+            salvar_config("precos_sucos", novos_precos_sucos)
+            st.success("✨ Cardápio e preços de sucos atualizados com sucesso!")
             st.rerun()
             
     with admin_tab2:
@@ -542,7 +552,6 @@ else:
 
     st.markdown("---")
     
-    # SELETOR DE MODO DE PEDIDO (MANUAL OU VOZ / TEXTO INTELIGENTE)
     modo_pedido = st.radio(
         "Como prefere fazer o seu pedido?",
         ["📝 Modo Tradicional (Manual)", "🎙️ Modo Inteligente por Voz / Texto Livre"],
@@ -550,7 +559,7 @@ else:
     )
 
     # ---------------------------------------------------------
-    # MODO 1: TRADICIONAL (MANUAL COM BOTÕES)
+    # MODO 1: TRADICIONAL (MANUAL COM REFEIÇÕES E SUCOS)
     # ---------------------------------------------------------
     if modo_pedido == "📝 Modo Tradicional (Manual)":
         st.markdown("### 🥗 1️⃣ Monte a sua Refeição")
@@ -611,8 +620,41 @@ else:
                     st.success("Refeição adicionada ao carrinho!")
                     st.rerun()
 
+        st.divider()
+        st.markdown("### 🥤 2️⃣ Sucos e Bebidas (Opcional)")
+        quer_suco = st.checkbox("Deseja adicionar um Suco ao seu pedido?")
+
+        if quer_suco:
+            col_s1, col_s2 = st.columns(2)
+            with col_s1:
+                sabor_suco = st.selectbox("Sabor do Suco:", ["Acerola", "Cajá", "Maracujá"])
+            with col_s2:
+                tamanho_suco = st.selectbox("Tamanho do Suco:", ["Copo de 300 ml", "Jarra de 1 L"])
+                
+            chave_tamanho_busca = "Copo (300 ml)" if "Copo" in tamanho_suco else "Jarra (1 L)"
+            chave_preco = f"{sabor_suco} - {chave_tamanho_busca}"
+            preco_suco = float(precos_sucos.get(chave_preco, 7.00))
+            
+            ponto_acucar = st.radio("Açúcar:", ["Com Açúcar", "Sem Açúcar", "Pouco Açúcar"], horizontal=True)
+            st.info(f"Valor do Suco: **R$ {preco_suco:.2f}**")
+
+            if st.button("➕ Adicionar Suco ao Carrinho"):
+                if not nome_cliente or not telefone_cliente:
+                    st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
+                else:
+                    artigo = "Um" if "copo" in tamanho_suco.lower() else "Uma"
+                    desc_suco = f"{artigo} {tamanho_suco.lower()} de suco de {sabor_suco.lower()} ({ponto_acucar.lower()})"
+                    st.session_state.carrinho_atual.append({
+                        "quantidade": 1,
+                        "item_principal": desc_suco,
+                        "detalhes": "",
+                        "preco": preco_suco
+                    })
+                    st.success("Suco adicionado ao carrinho!")
+                    st.rerun()
+
     # ---------------------------------------------------------
-    # MODO 2: INTELIGENTE POR VOZ / TEXTO LIVRE (COM MULTI-ITENS E PREÇOS CORRETOS)
+    # MODO 2: INTELIGENTE POR VOZ / TEXTO LIVRE
     # ---------------------------------------------------------
     else:
         st.markdown("### 🎙️ Fale ou Digite o seu Pedido Completo")
@@ -640,9 +682,9 @@ else:
 
     st.divider()
 
-    st.markdown("### 🛒 2️⃣ Seu Pedido Atual")
+    st.markdown("### 🛒 Seu Pedido Atual")
     if not st.session_state.carrinho_atual:
-        st.info("O seu carrinho está vazio. Adicione uma refeição acima.")
+        st.info("O seu carrinho está vazio. Adicione uma refeição ou suco acima.")
     else:
         total_geral = 0.0
         for i, item in enumerate(st.session_state.carrinho_atual):
@@ -662,7 +704,7 @@ else:
         st.markdown(f"### 💰 **Total do Pedido: R$ {total_geral:.2f}**")
         
         st.markdown("---")
-        st.markdown("### 💳 3️⃣ Forma de Pagamento & Finalização")
+        st.markdown("### 💳 Forma de Pagamento & Finalização")
         col_p1, col_p2 = st.columns(2)
         with col_p1:
             forma_pagamento = st.selectbox("Forma de Pagamento:", ["Pix", "Dinheiro", "Cartão na Retirada"])
@@ -692,7 +734,16 @@ else:
                 if forma_pagamento == "Dinheiro" and troco_info:
                     pagamento_texto += f" (Troco para: {troco_info})"
 
-                salvar_pedido(date.today(), nome_cliente, telefone_cliente, horario_retirada, texto_itens.replace("\n", " | "), total_geral, pagamento_texto, info_formal_pagamento)
+                salvar_pedido(
+                    date.today(), 
+                    nome_cliente, 
+                    telefone_cliente, 
+                    horario_retirada, 
+                    texto_itens.replace("\n", " | "), 
+                    total_geral, 
+                    pagamento_texto, 
+                    info_formal_pagamento
+                )
                 
                 whatsapp_restaurante = "5599981370792"
                 texto_mensagem = f"NOVO PEDIDO :\nCliente: {nome_cliente}\nHorário de Retirada: {horario_retirada}\n\n{texto_itens}\n\nForma de Pagamento: {pagamento_texto}\nInformação Formal de Pagamento: {info_formal_pagamento}\nTotal Geral: R$ {total_geral:.2f}"
