@@ -180,7 +180,6 @@ def deletar_item_estoque(id_item):
     conn.commit()
     conn.close()
 
-# FORNECEDORES
 def carregar_fornecedores():
     conn = get_db_connection()
     df = pd.read_sql_query("SELECT * FROM fornecedores ORDER BY id DESC", conn)
@@ -202,7 +201,6 @@ def deletar_fornecedor(id_forn):
     conn.commit()
     conn.close()
 
-# DONOS / PROPRIETÁRIOS
 def carregar_donos():
     conn = get_db_connection()
     df = pd.read_sql_query("SELECT * FROM donos ORDER BY id DESC", conn)
@@ -419,7 +417,7 @@ if st.session_state.modo_admin:
     st.markdown("""
         <div class='app-header'>
             <h1>🔒 Painel de Gestão & Administração</h1>
-            <p>Controle do cardápio, recepção de pedidos, estoque, fornecedores, donos e fechamento financeiro.</p>
+            <p>Controle do cardápio, recepção de pedidos, estoque, fornecedores, donos e relatórios gerenciais.</p>
         </div>
     """, unsafe_allow_html=True)
     
@@ -429,12 +427,13 @@ if st.session_state.modo_admin:
 
     st.divider()
 
-    admin_tab1, admin_tab2, admin_tab3, admin_tab5, admin_tab6, admin_tab4 = st.tabs([
+    admin_tab1, admin_tab2, admin_tab3, admin_tab5, admin_tab6, admin_tab7, admin_tab4 = st.tabs([
         "⚙️ Cardápio & Preços", 
         "📋 Pedidos & Comandas", 
         "📦 Estoque & Conciliação",
         "🤝 Fornecedores",
         "👑 Área dos Donos",
+        "📈 Relatórios & Inteligência",
         "📊 Fechamento de Caixa"
     ])
     
@@ -472,9 +471,14 @@ if st.session_state.modo_admin:
             
     with admin_tab2:
         st.markdown("#### 📥 Pedidos Recebidos & Impressão de Comanda")
+        filtro_status = st.selectbox("Filtrar Pedidos por Status:", ["Todos", "Pendente", "Em Preparo", "Pronto p/ Retirada", "Pago / Concluído", "Cancelado"])
         lista_pedidos = carregar_pedidos()
+        
+        if filtro_status != "Todos":
+            lista_pedidos = [p for p in lista_pedidos if p['estado'] == filtro_status]
+            
         if not lista_pedidos:
-            st.info("Nenhum pedido recebido até o momento.")
+            st.info("Nenhum pedido encontrado com o filtro selecionado.")
         else:
             for ped in lista_pedidos:
                 with st.expander(f"📦 Pedido #{ped['id']} - {ped['cliente']} | Status: {ped['estado']} (R$ {ped['total']:.2f})"):
@@ -609,7 +613,7 @@ if st.session_state.modo_admin:
                         st.rerun()
                 st.markdown("---")
 
-    # ABA RESTAURADA: ÁREA DOS DONOS
+    # ABA: ÁREA DOS DONOS
     with admin_tab6:
         st.markdown("#### 👑 Área Exclusiva dos Proprietários")
         st.info("Espaço reservado para cadastro de sócios, diretoria e notas estratégicas do negócio.")
@@ -653,18 +657,47 @@ if st.session_state.modo_admin:
                         st.rerun()
                 st.markdown("---")
 
+    # NOVA ABA: RELATÓRIOS & INTELIGÊNCIA
+    with admin_tab7:
+        st.markdown("#### 📈 Relatórios de Desempenho & Inteligência do Negócio")
+        st.info("Visão analítica gerencial para tomada de decisões rápidas.")
+        
+        lista_pedidos = carregar_pedidos()
+        if not lista_pedidos:
+            st.warning("Ainda não há dados suficientes de pedidos para gerar relatórios.")
+        else:
+            df_rel = pd.DataFrame(lista_pedidos)
+            
+            col_r1, col_r2 = st.columns(2)
+            with col_r1:
+                st.markdown("##### 📊 Pedidos por Status")
+                status_counts = df_rel['estado'].value_counts()
+                st.bar_chart(status_counts)
+                
+            with col_r2:
+                st.markdown("##### 💳 Faturamento por Forma de Pagamento")
+                if 'pagamento' in df_rel.columns:
+                    pagamento_counts = df_rel.groupby('pagamento')['total'].sum()
+                    st.bar_chart(pagamento_counts)
+                else:
+                    st.info("Dados de pagamento indisponíveis.")
+
     with admin_tab4:
         st.markdown("#### 📊 Fechamento de Caixa & Resumo Financeiro")
         lista_pedidos = carregar_pedidos()
         df_vendas = pd.DataFrame(lista_pedidos) if lista_pedidos else pd.DataFrame()
         
         total_pagos = df_vendas[df_vendas["estado"] == "Pago / Concluído"]["total"].sum() if not df_vendas.empty else 0.0
+        qtd_pagos = len(df_vendas[df_vendas["estado"] == "Pago / Concluído"]) if not df_vendas.empty else 0
+        ticket_medio = (total_pagos / qtd_pagos) if qtd_pagos > 0 else 0.0
         
-        col_m1, col_m2 = st.columns(2)
+        col_m1, col_m2, col_m3 = st.columns(3)
         with col_m1:
             st.metric(label="💰 Vendas Concluídas", value=f"R$ {total_pagos:.2f}")
         with col_m2:
-            st.metric(label="📦 Total de Pedidos Faturados", value=len(df_vendas))
+            st.metric(label="📦 Pedidos Concluídos", value=qtd_pagos)
+        with col_m3:
+            st.metric(label="🏷️ Ticket Médio", value=f"R$ {ticket_medio:.2f}")
 
 # ==========================================
 # VISÃO DO CLIENTE (INTERFACE PRINCIPAL)
@@ -689,6 +722,10 @@ else:
         st.session_state.carrinho_atual = []
 
     st.markdown("---")
+
+    qtd_itens_carrinho = len(st.session_state.carrinho_atual)
+    if qtd_itens_carrinho > 0:
+        st.info(f"🛒 **Seu carrinho contém {qtd_itens_carrinho} item(ns).** Role até o final para revisar e enviar o pedido.")
 
     modo_pedido = st.radio(
         "Como prefere fazer o seu pedido?",
@@ -781,7 +818,6 @@ else:
             ponto_acucar = st.radio("Açúcar:", ["Com Açúcar", "Sem Açúcar", "Pouco Açúcar"], horizontal=True)
             st.info(f"Valor Total ({qtd_suco}x): **R$ {preco_total_suco:.2f}**")
 
-            # Botão muda dinamicamente se estiver na animação de sucesso
             if st.session_state.suco_sucesso_anim:
                 btn_label = "✅ Suco Adicionado com Sucesso!"
             else:
@@ -812,7 +848,6 @@ else:
                     st.toast("✅ Suco adicionado com sucesso!", icon="🥤")
                     st.rerun()
 
-        # Reseta o estado do botão animado após o reload
         if st.session_state.suco_sucesso_anim:
             st.session_state.suco_sucesso_anim = False
 
