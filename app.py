@@ -279,7 +279,7 @@ def processar_fala_inteligente(texto_fala, preco_marmita_base, precos_sucos_dict
     return itens_extraidos
 
 # ==========================================
-# DESIGN E ESTILO CSS ULTRA MODERNO
+# DESIGN E ESTILO CSS ULTRA MODERNO + EFEITO 3D
 # ==========================================
 st.markdown("""
     <style>
@@ -310,6 +310,30 @@ st.markdown("""
         margin-top: 6px;
     }
 
+    /* Efeito 3D para destaques do cardápio */
+    .card-3d {
+        background: #ffffff;
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.08), 0 6px 6px rgba(0,0,0,0.1);
+        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        transform-style: preserve-3d;
+        perspective: 1000px;
+        border: 1px solid #e2e8f0;
+        margin-bottom: 15px;
+        text-align: center;
+    }
+    .card-3d:hover {
+        transform: translateY(-8px) rotateX(4deg) rotateY(-2deg);
+        box-shadow: 0 18px 30px rgba(16, 185, 129, 0.25), 0 10px 10px rgba(0,0,0,0.12);
+    }
+    .card-3d-icon {
+        font-size: 3.5rem;
+        text-shadow: 2px 4px 10px rgba(0,0,0,0.15);
+        display: inline-block;
+        transform: translateZ(30px);
+    }
+
     .stButton>button {
         border-radius: 12px !important;
         font-weight: 700 !important;
@@ -332,21 +356,6 @@ st.markdown("""
         border: 1px solid #e2e8f0 !important;
         box-shadow: 0 2px 10px rgba(0, 0, 0, 0.02) !important;
         margin-bottom: 12px !important;
-    }
-
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #ffffff;
-        border-radius: 10px 10px 0 0;
-        padding: 10px 18px;
-        font-weight: 600;
-        color: #64748b;
-    }
-    .stTabs [aria-selected="true"] {
-        color: #10b981 !important;
-        border-bottom: 3px solid #10b981 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -553,6 +562,28 @@ else:
         st.session_state.carrinho_atual = []
 
     st.markdown("---")
+
+    # CARDS 3D INTERATIVOS EM DESTAQUE NA TELA
+    col_3d_1, col_3d_2 = st.columns(2)
+    with col_3d_1:
+        st.markdown("""
+            <div class='card-3d'>
+                <span class='card-3d-icon'>🍱</span>
+                <h3 style='margin:10px 0 0 0; color:#059669;'>Refeição Completa</h3>
+                <p style='color:#64748b; font-size:0.9rem;'>Escolha sua carne e acompanhamentos fresquinhos do dia.</p>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with col_3d_2:
+        st.markdown("""
+            <div class='card-3d'>
+                <span class='card-3d-icon'>🍹</span>
+                <h3 style='margin:10px 0 0 0; color:#059669;'>Sucos da Fruta</h3>
+                <p style='color:#64748b; font-size:0.9rem;'>Acerola, Cajá e Maracujá em copo ou jarra geladinha.</p>
+            </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("---")
     
     modo_pedido = st.radio(
         "Como prefere fazer o seu pedido?",
@@ -561,7 +592,7 @@ else:
     )
 
     # ---------------------------------------------------------
-    # MODO 1: TRADICIONAL (MANUAL COM REFEIÇÕES E SUCOS PROTEGIDOS)
+    # MODO 1: TRADICIONAL (MANUAL COM REFEIÇÕES E SUCOS)
     # ---------------------------------------------------------
     if modo_pedido == "📝 Modo Tradicional (Manual)":
         st.markdown("### 🥗 1️⃣ Monte a sua Refeição")
@@ -626,7 +657,6 @@ else:
         st.divider()
         st.markdown("### 🥤 2️⃣ Sucos e Bebidas (Opcional)")
         
-        # FORMULÁRIO COM SELETOR DE QUANTIDADE E PROTEÇÃO CONTRA DUPLO CLIQUE
         ks = st.session_state.form_suco_key
         with st.form(key=f"form_suco_{ks}"):
             col_s1, col_s2, col_s3 = st.columns([2, 2, 1])
