@@ -2,131 +2,232 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 import urllib.parse
-import random
+import sqlite3
+import json
 
-# Configuração da página com layout amplo e visual mobile-first
+# Configuração da página
 st.set_page_config(page_title="App Restaurante - Pedidos e Gestão", page_icon="🍽️", layout="wide")
 
 # ==========================================
-# DESIGN E ESTILO CSS PREMIUM (SUPER ELEGANTE)
+# CONEXÃO E BANCO DE DADOS PERSISTENTE (SQLITE)
+# ==========================================
+DB_FILE = "restaurante.db"
+
+def get_db_connection():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Tabela de Configurações do Cardápio
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS configuracoes (
+            chave TEXT PRIMARY KEY,
+            valor TEXT
+        )
+    """)
+    
+    # Tabela de Estoque
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS estoque (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item TEXT,
+            categoria TEXT,
+            qtd REAL,
+            unidade TEXT,
+            consumo_por_marmita REAL,
+            data TEXT
+        )
+    """)
+    
+    # Tabela de Pedidos
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pedidos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data TEXT,
+            cliente TEXT,
+            telefone TEXT,
+            horario_retirada TEXT,
+            pedido TEXT,
+            total REAL,
+            pagamento TEXT,
+            nota_info TEXT,
+            estado TEXT
+        )
+    """)
+
+    # Tabela de Compras
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS compras (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            produto TEXT,
+            qtd REAL,
+            unidade TEXT,
+            vl_unit REAL,
+            total REAL,
+            pessoal INTEGER,
+            empresa TEXT,
+            data TEXT,
+            obs TEXT
+        )
+    """)
+
+    # Tabela de Fornecedores
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fornecedores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT,
+            contato TEXT,
+            produtos TEXT,
+            obs TEXT
+        )
+    """)
+
+    # Tabela de Dívidas / Custos Privados
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dividas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            descricao TEXT,
+            tipo TEXT,
+            valor_mensal REAL,
+            parcelas_restantes INTEGER,
+            obs TEXT
+        )
+    """)
+    
+    # Inserir dados padrões caso esteja vazio
+    cursor.execute("SELECT COUNT(*) FROM configuracoes")
+    if cursor.fetchone()[0] == 0:
+        menu_padrao = {
+            "carnes": ["Panelada", "Assado de Panela", "Costela", "Chambaril", "Frango Grelhado", "Peixe Frito"],
+            "tipos_arroz": ["Arroz com feijão de caldo", "Arroz misturado / arroz baião", "Sem feijão"],
+            "acompanhamentos_padrao": ["Salada", "Macarrão", "Farofa"],
+            "preco_marmita": 20.00
+        }
+        sucos_padrao = {
+            "Acerola - Copo (300 ml)": 7.00,
+            "Acerola - Jarra (1 L)": 14.00,
+            "Cajá - Copo (300 ml)": 9.00,
+            "Cajá - Jarra (1 L)": 18.00,
+            "Maracujá - Copo (300 ml)": 10.00,
+            "Maracujá - Jarra (1 L)": 20.00
+        }
+        cursor.execute("INSERT INTO configuracoes VALUES ('menu_diario', ?)", (json.dumps(menu_padrao),))
+        cursor.execute("INSERT INTO configuracoes VALUES ('precos_sucos', ?)", (json.dumps(sucos_padrao),))
+
+    cursor.execute("SELECT COUNT(*) FROM estoque")
+    if cursor.fetchone()[0] == 0:
+        itens_estoque_padrao = [
+            ("Refrigerante Coca-Cola Lata", "Bebidas", 24.0, "UN", 0.0, str(date.today())),
+            ("Refrigerante Fanta Lata", "Bebidas", 24.0, "UN", 0.0, str(date.today())),
+            ("Arroz", "Cozinha / Estocáveis", 25.0, "KG", 0.150, str(date.today())),
+            ("Feijão", "Cozinha / Estocáveis", 15.0, "KG", 0.100, str(date.today())),
+            ("Coxão Mole", "Cozinha / Estocáveis", 7.0, "KG", 0.300, str(date.today())),
+            ("Alface / Verduras", "Verduras", 5.0, "KG", 0.080, str(date.today())),
+            ("Pacote Marmita c/ 100un", "Embalagens e Marmitas", 1.0, "Pacotes", 0.01, str(date.today()))
+        ]
+        cursor.executemany("INSERT INTO estoque (item, categoria, qtd, unidade, consumo_por_marmita, data) VALUES (?, ?, ?, ?, ?, ?)", itens_estoque_padrao)
+
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# ==========================================
+# FUNÇÕES DE LEITURA E ESCRITA NO BANCO
+# ==========================================
+def carregar_config(chave):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT valor FROM configuracoes WHERE chave = ?", (chave,))
+    row = cursor.fetchone()
+    conn.close()
+    return json.loads(row["valor"]) if row else {}
+
+def salvar_config(chave, dados):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)", (chave, json.dumps(dados)))
+    conn.commit()
+    conn.close()
+
+def carregar_estoque():
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT * FROM estoque", conn)
+    conn.close()
+    return df.to_dict("records")
+
+def salvar_item_estoque(item, categoria, qtd, unidade, consumo, data_ent):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO estoque (item, categoria, qtd, unidade, consumo_por_marmita, data) VALUES (?, ?, ?, ?, ?, ?)",
+                   (item, categoria, qtd, unidade, consumo, str(data_ent)))
+    conn.commit()
+    conn.close()
+
+def atualizar_item_estoque(id_item, campo, valor):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(f"UPDATE estoque SET {campo} = ? WHERE id = ?", (valor, id_item))
+    conn.commit()
+    conn.close()
+
+def deletar_item_estoque(id_item):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM estoque WHERE id = ?", (id_item,))
+    conn.commit()
+    conn.close()
+
+def carregar_pedidos():
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT * FROM pedidos ORDER BY id DESC", conn)
+    conn.close()
+    return df.to_dict("records")
+
+def salvar_pedido(data_ped, cliente, telefone, horario, pedido_str, total, pagamento, nota_info):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO pedidos (data, cliente, telefone, horario_retirada, pedido, total, pagamento, nota_info, estado)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendente')
+    """, (str(data_ped), cliente, telefone, horario, pedido_str, total, pagamento, nota_info))
+    conn.commit()
+    conn.close()
+
+def atualizar_status_pedido(id_ped, novo_estado):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE pedidos SET estado = ? WHERE id = ?", (novo_estado, id_ped))
+    conn.commit()
+    conn.close()
+
+# ==========================================
+# DESIGN E ESTILO CSS PREMIUM
 # ==========================================
 st.markdown("""
     <style>
-    .main {
-        background-color: #f4f6f8;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    h1, h2, h3 {
-        color: #111827;
-        font-weight: 700;
-    }
-    .stMetric {
-        background-color: #ffffff;
-        padding: 16px;
-        border-radius: 14px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-        border-left: 5px solid #10b981;
-    }
-    .stButton>button {
-        border-radius: 10px;
-        font-weight: 600;
-        background-color: #10b981;
-        color: white;
-        border: none;
-        padding: 0.5rem 1rem;
-        transition: all 0.3s ease;
-        width: 100%;
-    }
-    .stButton>button:hover {
-        background-color: #059669;
-        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-    }
-    div[data-testid="stExpander"] {
-        background-color: #ffffff;
-        border-radius: 12px;
-        border: 1px solid #e5e7eb;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
-        margin-bottom: 12px;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #ffffff;
-        border-radius: 8px 8px 0px 0px;
-        padding: 10px 16px;
-        font-weight: 600;
-    }
+    .main { background-color: #f4f6f8; font-family: 'Inter', sans-serif; }
+    h1, h2, h3 { color: #111827; font-weight: 700; }
+    .stMetric { background-color: #ffffff; padding: 16px; border-radius: 14px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); border-left: 5px solid #10b981; }
+    .stButton>button { border-radius: 10px; font-weight: 600; background-color: #10b981; color: white; border: none; padding: 0.5rem 1rem; width: 100%; }
+    .stButton>button:hover { background-color: #059669; }
+    div[data-testid="stExpander"] { background-color: #ffffff; border-radius: 12px; border: 1px solid #e5e7eb; margin-bottom: 12px; }
     </style>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# INICIALIZAÇÃO DO BANCO DE DADOS NA SESSÃO
-# ==========================================
+# Inicializar sessões com dados do banco
 if "modo_admin" not in st.session_state:
     st.session_state.modo_admin = False
 
-if "menu_diario" not in st.session_state:
-    st.session_state.menu_diario = {
-        "carnes": ["Panelada", "Assado de Panela", "Costela", "Chambaril", "Frango Grelhado", "Peixe Frito"],
-        "tipos_arroz": [
-            "Arroz com feijão de caldo", 
-            "Arroz misturado / arroz baião",
-            "Sem feijão"
-        ],
-        "acompanhamentos_padrao": ["Salada", "Macarrão", "Farofa"],
-        "preco_marmita": 20.00,
-        "preco_porcao_avulsa": 15.00
-    }
-
-if "precos_sucos" not in st.session_state:
-    st.session_state.precos_sucos = {
-        "Acerola - Copo (300 ml)": 7.00,
-        "Acerola - Jarra (1 L)": 14.00,
-        "Cajá - Copo (300 ml)": 9.00,
-        "Cajá - Jarra (1 L)": 18.00,
-        "Maracujá - Copo (300 ml)": 10.00,
-        "Maracujá - Jarra (1 L)": 20.00
-    }
-
-if "pedidos_clientes" not in st.session_state:
-    st.session_state.pedidos_clientes = []
-
-if "compras_registro" not in st.session_state:
-    st.session_state.compras_registro = []
-
-if "cupons_importados" not in st.session_state:
-    st.session_state.cupons_importados = set()
-
-# Banco de dados de Estoque com Data e Categoria Ajustável
-if "estoque_geral" not in st.session_state:
-    st.session_state.estoque_geral = [
-        {"item": "Refrigerante Lata", "categoria": "Bebidas", "qtd": 48.0, "unidade": "UN", "consumo_por_marmita": 0.0, "data": str(date.today())},
-        {"item": "Arroz", "categoria": "Cozinha / Estocáveis", "qtd": 25.0, "unidade": "KG", "consumo_por_marmita": 0.150, "data": str(date.today())},
-        {"item": "Feijão", "categoria": "Cozinha / Estocáveis", "qtd": 15.0, "unidade": "KG", "consumo_por_marmita": 0.100, "data": str(date.today())},
-        {"item": "Coxão Mole", "categoria": "Cozinha / Estocáveis", "qtd": 7.0, "unidade": "KG", "consumo_por_marmita": 0.300, "data": str(date.today())},
-        {"item": "Alface / Verduras", "categoria": "Verduras", "qtd": 5.0, "unidade": "KG", "consumo_por_marmita": 0.080, "data": str(date.today())},
-        {"item": "Pacote Marmita c/ 100un", "categoria": "Embalagens e Marmitas", "qtd": 1.0, "unidade": "Pacotes", "consumo_por_marmita": 0.01, "data": str(date.today())},
-    ]
-
-if "fornecedores_registro" not in st.session_state:
-    st.session_state.fornecedores_registro = [
-        {
-            "nome": "Supermercado Local",
-            "contato": "(99) 99999-9999",
-            "produtos": "Hortifruti, Bebidas, Limpeza e Estocáveis",
-            "obs": "Compra de insumos diários com emissão de NFC-e"
-        }
-    ]
-
-if "dividas_privadas" not in st.session_state:
-    st.session_state.dividas_privadas = [
-        {"descricao": "Parcela Financiamento Carro", "tipo": "Pessoal", "valor_mensal": 1200.00, "parcelas_restantes": 24, "obs": "Financiamento do veículo da família"},
-        {"descricao": "Salários e Encargos Funcionários", "tipo": "Empresa (Funcionários)", "valor_mensal": 3500.00, "parcelas_restantes": 12, "obs": "Folha de pagamento + taxas/impostos de 2 funcionários"}
-    ]
-
 if "form_refeicao_key" not in st.session_state:
     st.session_state.form_refeicao_key = 0
+
+menu_diario = carregar_config("menu_diario")
+precos_sucos = carregar_config("precos_sucos")
 
 # ==========================================
 # SE O ADMINISTRADOR ESTIVER LOGADO
@@ -139,246 +240,129 @@ if st.session_state.modo_admin:
 
     st.divider()
 
-    admin_tab1, admin_tab2, admin_tab3, admin_tab4, admin_tab5, admin_tab6, admin_tab7 = st.tabs([
+    admin_tab1, admin_tab2, admin_tab3, admin_tab4 = st.tabs([
         "⚙️ Cardápio e Preços", 
         "📋 Pedidos em Tempo Real", 
-        "📦 Estoque & Baixa",
-        "🛒 Compras e Cupons",
-        "🚚 Fornecedores",
-        "🔐 Finanças dos Sócios",
+        "📦 Estoque Persistente",
         "📊 Fechamento de Caixa"
     ])
     
     with admin_tab1:
         st.markdown("#### 🥩 Configuração de Carnes do Dia")
-        novas_carnes = st.text_area("Lista de Carnes (separadas por vírgula):", value=", ".join(st.session_state.menu_diario["carnes"]))
+        novas_carnes = st.text_area("Lista de Carnes (separadas por vírgula):", value=", ".join(menu_diario["carnes"]))
         
         st.divider()
         st.markdown("#### 🍚 Opções de Acompanhamento Base")
-        novos_tipos_arroz = st.text_area("Opções Base (separadas por vírgula):", value=", ".join(st.session_state.menu_diario["tipos_arroz"]))
+        novos_tipos_arroz = st.text_area("Opções Base (separadas por vírgula):", value=", ".join(menu_diario["tipos_arroz"]))
 
         st.divider()
         st.markdown("#### 🥗 Outros Acompanhamentos")
-        novos_acompanhamentos = st.text_area("Outros Acompanhamentos:", value=", ".join(st.session_state.menu_diario["acompanhamentos_padrao"]))
+        novos_acompanhamentos = st.text_area("Outros Acompanhamentos:", value=", ".join(menu_diario["acompanhamentos_padrao"]))
         
         st.divider()
         st.markdown("#### 💰 Preço Padrão da Refeição")
-        preco_marmita_novo = st.number_input("Preço Padrão (R$):", value=st.session_state.menu_diario["preco_marmita"], step=1.00)
-        
-        st.divider()
-        st.markdown("#### 🧃 Gestão de Preços de Sucos")
-        novos_precos_sucos = {}
-        for chave_suco, preco_atual in st.session_state.precos_sucos.items():
-            novos_precos_sucos[chave_suco] = st.number_input(f"Preço ({chave_suco}) (R$):", min_value=0.0, value=float(preco_atual), step=0.50)
+        preco_marmita_novo = st.number_input("Preço Padrão (R$):", value=float(menu_diario["preco_marmita"]), step=1.00)
         
         if st.button("💾 Guardar Alterações do Cardápio", type="primary"):
-            st.session_state.menu_diario["carnes"] = [c.strip() for c in novas_carnes.split(",") if c.strip()]
-            st.session_state.menu_diario["tipos_arroz"] = [r.strip() for r in novos_tipos_arroz.split(",") if r.strip()]
-            st.session_state.menu_diario["acompanhamentos_padrao"] = [a.strip() for a in novos_acompanhamentos.split(",") if a.strip()]
-            st.session_state.menu_diario["preco_marmita"] = preco_marmita_novo
-            st.session_state.precos_sucos = novos_precos_sucos
-            st.success("Cardápio e preços atualizados com sucesso!")
+            menu_diario["carnes"] = [c.strip() for c in novas_carnes.split(",") if c.strip()]
+            menu_diario["tipos_arroz"] = [r.strip() for r in novos_tipos_arroz.split(",") if r.strip()]
+            menu_diario["acompanhamentos_padrao"] = [a.strip() for a in novos_acompanhamentos.split(",") if a.strip()]
+            menu_diario["preco_marmita"] = preco_marmita_novo
+            salvar_config("menu_diario", menu_diario)
+            st.success("Cardápio salvo permanentemente no banco de dados!")
+            st.rerun()
             
     with admin_tab2:
-        st.markdown("#### 📥 Acompanhamento de Pedidos")
-        if not st.session_state.pedidos_clientes:
+        st.markdown("#### 📥 Pedidos Recebidos")
+        lista_pedidos = carregar_pedidos()
+        if not lista_pedidos:
             st.info("Nenhum pedido recebido.")
         else:
-            filtro_status = st.selectbox("Filtrar por Status:", ["Todos", "Pendente", "Em Preparo", "Pronto p/ Retirada", "Pago / Concluído", "Cancelado"])
-            
-            pedidos_filtrados = st.session_state.pedidos_clientes
-            if filtro_status != "Todos":
-                pedidos_filtrados = [p for p in st.session_state.pedidos_clientes if p["Estado"] == filtro_status]
-            
-            for index, ped in enumerate(st.session_state.pedidos_clientes):
-                with st.expander(f"Pedido #{ped['ID']} - Cliente: {ped['Cliente']} | Status: {ped['Estado']} (R$ {ped['Total']:.2f})"):
-                    st.write(f"**Telefone:** {ped['Telefone']}")
-                    st.write(f"**Horário de Retirada:** {ped['Horário Retirada']}")
-                    st.write(f"**Pedido:** {ped['Pedido']}")
-                    st.write(f"**Pagamento:** {ped['Pagamento']}")
-                    st.write(f"**Info Formal / Nota:** {ped.get('Nota/Info Formal', 'Não')}")
+            for ped in lista_pedidos:
+                with st.expander(f"Pedido #{ped['id']} - Cliente: {ped['cliente']} | Status: {ped['estado']} (R$ {ped['total']:.2f})"):
+                    st.write(f"**Data:** {ped['data']}")
+                    st.write(f"**Telefone:** {ped['telefone']}")
+                    st.write(f"**Horário Retirada:** {ped['horario_retirada']}")
+                    st.write(f"**Pedido:** {ped['pedido']}")
+                    st.write(f"**Pagamento:** {ped['pagamento']}")
+                    st.write(f"**Nota Formal:** {ped['nota_info']}")
                     
-                    novo_estado = st.selectbox("Alterar Status:", ["Pendente", "Em Preparo", "Pronto p/ Retirada", "Pago / Concluído", "Cancelado"], index=["Pendente", "Em Preparo", "Pronto p/ Retirada", "Pago / Concluído", "Cancelado"].index(ped['Estado']), key=f"status_sel_{ped['ID']}")
-                    if st.button("💾 Atualizar Status", key=f"btn_status_{ped['ID']}"):
-                        st.session_state.pedidos_clientes[index]["Estado"] = novo_estado
+                    novo_estado = st.selectbox("Alterar Status:", ["Pendente", "Em Preparo", "Pronto p/ Retirada", "Pago / Concluído", "Cancelado"],
+                                               index=["Pendente", "Em Preparo", "Pronto p/ Retirada", "Pago / Concluído", "Cancelado"].index(ped['estado']),
+                                               key=f"status_sel_{ped['id']}")
+                    if st.button("💾 Atualizar Status", key=f"btn_status_{ped['id']}"):
+                        atualizar_status_pedido(ped['id'], novo_estado)
+                        st.success("Status atualizado!")
                         st.rerun()
 
-    # ----------------------------------------------------
-    # ABA: ESTOQUE & BAIXA COM CATEGORIA E DATA
-    # ----------------------------------------------------
     with admin_tab3:
-        st.markdown("#### 📦 Controle de Estoque, Datas e Organização Manual")
-        st.write("Adicione itens, registre a data da compra/entrada e organize cada produto na categoria correta (Verduras, Cozinha, Bebidas ou Embalagens).")
+        st.markdown("#### 📦 Controle de Estoque (Salvo no Banco)")
+        st.write("Tudo o que for adicionado aqui continuará salvo ao sair do sistema!")
 
         with st.form("form_novo_item_estoque"):
             st.markdown("##### ➕ Adicionar Item ao Estoque")
             col_e1, col_e2, col_e3 = st.columns(3)
             with col_e1:
-                nome_item = st.text_input("Nome do Item (ex: Alface, Pacote Marmita):")
+                nome_item = st.text_input("Nome do Item (ex: Fanta Lata, Coxão Mole):")
                 data_item = st.date_input("Data de Entrada:", value=date.today())
             with col_e2:
-                cat_item = st.selectbox("Selecionar Categoria:", ["Verduras", "Cozinha / Estocáveis", "Bebidas", "Embalagens e Marmitas"])
+                cat_item = st.selectbox("Categoria:", ["Bebidas", "Cozinha / Estocáveis", "Verduras", "Embalagens e Marmitas"])
                 un_item = st.selectbox("Unidade:", ["KG", "UN", "Litros", "Pacotes"])
             with col_e3:
                 qtd_item = st.number_input("Quantidade:", min_value=0.0, value=1.0, step=1.0)
-                consumo_marmita = st.number_input("Consumo p/ Marmita:", min_value=0.0, value=0.0, step=0.01, help="Ex: 0.30 para 300g")
+                consumo_marmita = st.number_input("Consumo p/ Marmita:", min_value=0.0, value=0.0, step=0.01)
 
             if st.form_submit_button("💾 Salvar no Estoque", type="primary"):
                 if not nome_item:
                     st.error("Informe o nome do item.")
                 else:
-                    st.session_state.estoque_geral.append({
-                        "item": nome_item,
-                        "categoria": cat_item,
-                        "qtd": qtd_item,
-                        "unidade": un_item,
-                        "consumo_por_marmita": consumo_marmita,
-                        "data": str(data_item)
-                    })
-                    st.success("Item adicionado ao estoque com sucesso!")
+                    salvar_item_estoque(nome_item, cat_item, qtd_item, un_item, consumo_marmita, data_item)
+                    st.success("Item salvo no banco de dados com sucesso!")
                     st.rerun()
 
         st.divider()
-        st.markdown("##### 📋 Gerenciar Estoque por Categoria")
+        st.markdown("##### 📋 Itens em Estoque")
+        estoque_atual = carregar_estoque()
         
-        categorias_disponiveis = ["Verduras", "Cozinha / Estocáveis", "Bebidas", "Embalagens e Marmitas"]
+        categorias_disponiveis = ["Bebidas", "Cozinha / Estocáveis", "Verduras", "Embalagens e Marmitas"]
         cat_selecionada = st.radio("Filtrar Categoria:", categorias_disponiveis, horizontal=True)
 
-        for idx, item_est in enumerate(st.session_state.estoque_geral):
+        for item_est in estoque_atual:
             if item_est["categoria"] == cat_selecionada:
                 col_i1, col_i2, col_i3, col_i4, col_i5 = st.columns([2, 2, 2, 2, 1])
                 with col_i1:
                     st.write(f"• **{item_est['item']}**")
-                    st.caption(f"📅 Data: {item_est.get('data', 'N/I')}")
+                    st.caption(f"📅 Entrada: {item_est['data']}")
                 with col_i2:
-                    nova_cat = st.selectbox("Categoria", categorias_disponiveis, index=categorias_disponiveis.index(item_est["categoria"]), key=f"est_cat_{idx}")
-                    st.session_state.estoque_geral[idx]["categoria"] = nova_cat
+                    nova_cat = st.selectbox("Categoria", categorias_disponiveis, index=categorias_disponiveis.index(item_est["categoria"]), key=f"est_cat_{item_est['id']}")
+                    if nova_cat != item_est["categoria"]:
+                        atualizar_item_estoque(item_est['id'], "categoria", nova_cat)
+                        st.rerun()
                 with col_i3:
-                    nova_qtd = st.number_input(f"Qtd ({item_est['unidade']})", value=float(item_est['qtd']), step=1.0, key=f"est_qtd_{idx}")
-                    st.session_state.estoque_geral[idx]["qtd"] = nova_qtd
+                    nova_qtd = st.number_input(f"Qtd ({item_est['unidade']})", value=float(item_est['qtd']), step=1.0, key=f"est_qtd_{item_est['id']}")
+                    if nova_qtd != item_est["qtd"]:
+                        atualizar_item_estoque(item_est['id'], "qtd", nova_qtd)
                 with col_i4:
-                    novo_consumo = st.number_input("Gasto/Marmita", value=float(item_est['consumo_por_marmita']), step=0.01, key=f"est_cons_{idx}")
-                    st.session_state.estoque_geral[idx]["consumo_por_marmita"] = novo_consumo
+                    novo_consumo = st.number_input("Gasto/Marmita", value=float(item_est['consumo_por_marmita']), step=0.01, key=f"est_cons_{item_est['id']}")
+                    if novo_consumo != item_est["consumo_por_marmita"]:
+                        atualizar_item_estoque(item_est['id'], "consumo_por_marmita", novo_consumo)
                 with col_i5:
-                    if st.button("🗑️", key=f"del_est_{idx}"):
-                        st.session_state.estoque_geral.pop(idx)
+                    if st.button("🗑️", key=f"del_est_{item_est['id']}"):
+                        deletar_item_estoque(item_est['id'])
                         st.rerun()
                 st.markdown("---")
 
     with admin_tab4:
-        st.markdown("#### 🧾 Gestão de Compras e Cupons")
-        col_cup1, col_cup2, col_cup3 = st.columns(3)
-        with col_cup1:
-            empresa_cupom = st.text_input("Empresa / Estabelecimento:", placeholder="ex: Supermercado...")
-        with col_cup2:
-            data_compra_cupom = st.date_input("Data da Compra:", value=date.today())
-        with col_cup3:
-            obs_compra_cupom = st.text_input("Observação / Finalidade:", placeholder="ex: Insumos da semana...")
-
-        uploaded_file = st.file_uploader("Enviar Foto do Cupom Fiscal:", type=["jpg", "png", "jpeg"])
-
-        col_b1, col_b2 = st.columns(2)
-        with col_b1:
-            if st.button("📸 Simular Leitura Automática do Cupom", type="primary"):
-                empresa_nome_final = empresa_cupom.strip() if empresa_cupom.strip() else "Fornecedor Geral"
-                data_formatada = data_compra_cupom.strftime("%d/%m/%Y")
-                obs_final = obs_compra_cupom.strip() if obs_compra_cupom.strip() else "Compra de insumos"
-                
-                id_cupom_unico = f"{empresa_nome_final}_{data_formatada}_{obs_final}"
-                
-                if id_cupom_unico in st.session_state.cupons_importados:
-                    st.warning("⚠️ Este cupom já foi importado anteriormente!")
-                else:
-                    raw_items = [
-                        {"produto": "PEPINO", "qtd": 1.615, "unidade": "KG", "vl_unit": 3.99, "total": 6.44, "pessoal": False},
-                        {"produto": "ALFACE CRESPA", "qtd": 2, "unidade": "UN", "vl_unit": 6.90, "total": 13.80, "pessoal": False},
-                        {"produto": "OLEO SOJA PET 900ML", "qtd": 20, "unidade": "UN", "vl_unit": 7.99, "total": 159.80, "pessoal": False},
-                    ]
-                    for item in raw_items:
-                        item["empresa"] = empresa_nome_final
-                        item["data"] = data_formatada
-                        item["obs"] = obs_final
-
-                    st.session_state.compras_registro.extend(raw_items)
-                    st.session_state.cupons_importados.add(id_cupom_unico)
-                    st.success("Cupom importado com sucesso!")
-                    st.rerun()
-
-        with col_b2:
-            if st.button("🗑️ Limpar Compras"):
-                st.session_state.compras_registro = []
-                st.session_state.cupons_importados = set()
-                st.rerun()
-
-        st.divider()
-        st.markdown("#### 📋 Itens Registrados")
-        total_empresa = sum([c["total"] for c in st.session_state.compras_registro if not c["pessoal"]])
-        total_pessoal = sum([c["total"] for c in st.session_state.compras_registro if c["pessoal"]])
-
-        for idx, comp in enumerate(st.session_state.compras_registro):
-            col_item1, col_item2, col_item3, col_item4 = st.columns([3, 1, 1, 1])
-            with col_item1:
-                st.write(f"• **{comp['produto']}** (R$ {comp['vl_unit']:.2f})")
-                st.caption(f"🏢 {comp.get('empresa')} | 📅 {comp.get('data')}")
-                st.file_uploader("Foto produto:", type=["jpg", "png"], key=f"img_up_{idx}", label_visibility="collapsed")
-            with col_item2:
-                st.write(f"R$ {comp['total']:.2f}")
-            with col_item3:
-                pessoal_check = st.checkbox("Uso Pessoal?", value=comp["pessoal"], key=f"comp_pessoal_{idx}")
-                st.session_state.compras_registro[idx]["pessoal"] = pessoal_check
-            with col_item4:
-                if st.button("Excluir", key=f"del_comp_{idx}"):
-                    st.session_state.compras_registro.pop(idx)
-                    st.rerun()
-
-        c_tot1, c_tot2 = st.columns(2)
-        with c_tot1:
-            st.metric("Custos Empresa", f"R$ {total_empresa:.2f}")
-        with c_tot2:
-            st.metric("Gastos Pessoais", f"R$ {total_pessoal:.2f}")
-
-    with admin_tab5:
-        st.markdown("#### 🚚 Gestão de Fornecedores")
-        with st.form("form_novo_fornecedor"):
-            nome_fornecedor = st.text_input("Nome do Fornecedor:")
-            contato_fornecedor = st.text_input("Telefone / WhatsApp:")
-            produtos_fornecidos = st.text_input("Produtos:")
-            obs_fornecedor = st.text_input("Observações:")
-            if st.form_submit_button("💾 Salvar Fornecedor", type="primary"):
-                st.session_state.fornecedores_registro.append({"nome": nome_fornecedor, "contato": contato_fornecedor, "produtos": produtos_fornecidos, "obs": obs_fornecedor})
-                st.rerun()
-
-        for idx, forn in enumerate(st.session_state.fornecedores_registro):
-            with st.expander(f"🏢 {forn['nome']}"):
-                st.write(f"**Contato:** {forn['contato']} | **Produtos:** {forn['produtos']}")
-
-    with admin_tab6:
-        st.markdown("#### 🔐 Área Restrita dos Proprietários (Patrão)")
-        st.info("Apenas o dono da empresa tem acesso ao balanço final de dívidas e despesas particulares.")
-        senha_acesso = st.text_input("Digite a Senha Mestra do Proprietário:", type="password")
-
-        if senha_acesso != "1234":
-            st.warning("🔒 Digite a senha mestra (padrão: 1234) para liberar o acesso exclusivo do dono.")
-        else:
-            st.success("🔓 Acesso exclusivo liberado.")
-            df_vendas = pd.DataFrame(st.session_state.pedidos_clientes) if st.session_state.pedidos_clientes else pd.DataFrame()
-            total_pagos = df_vendas[df_vendas["Estado"] == "Pago / Concluído"]["Total"].sum() if not df_vendas.empty else 0.0
-            custo_compras_insumos = sum([c["total"] for c in st.session_state.compras_registro if not c["pessoal"]])
-            lucro_operacional = total_pagos - custo_compras_insumos
-            
-            st.metric("Lucro Líquido Operacional", f"R$ {lucro_operacional:.2f}")
-
-    with admin_tab7:
         st.markdown("#### 📊 Fechamento de Caixa")
-        df_vendas = pd.DataFrame(st.session_state.pedidos_clientes) if st.session_state.pedidos_clientes else pd.DataFrame()
-        total_pagos = df_vendas[df_vendas["Estado"] == "Pago / Concluído"]["Total"].sum() if not df_vendas.empty else 0.0
-        custo_compras = sum([c["total"] for c in st.session_state.compras_registro if not c["pessoal"]])
+        lista_pedidos = carregar_pedidos()
+        df_vendas = pd.DataFrame(lista_pedidos) if lista_pedidos else pd.DataFrame()
+        total_pagos = df_vendas[df_vendas["estado"] == "Pago / Concluído"]["total"].sum() if not df_vendas.empty else 0.0
         
         col_m1, col_m2 = st.columns(2)
         with col_m1:
-            st.metric(label="Vendas Recebidas", value=f"R$ {total_pagos:.2f}")
+            st.metric(label="Vendas Recebidas Concluídas", value=f"R$ {total_pagos:.2f}")
         with col_m2:
-            st.metric(label="Compras Insumos", value=f"R$ {custo_compras:.2f}")
+            st.metric(label="Total de Pedidos Registrados", value=len(df_vendas))
 
 # ==========================================
 # ABERTURA DIRETA: VISÃO DO CLIENTE
@@ -408,15 +392,15 @@ else:
         with col_qtd:
             quantidade = st.number_input("Qtd:", min_value=0, value=0, step=1, key=f"qtd_marmita_{k}")
         with col_carne:
-            carne_escolhida = st.selectbox("Escolha a Carne do Prato:", st.session_state.menu_diario["carnes"], key=f"carne_sel_{k}")
+            carne_escolhida = st.selectbox("Escolha a Carne do Prato:", menu_diario["carnes"], key=f"carne_sel_{k}")
         
-        tipo_arroz_feijao = st.radio("Escolha o acompanhamento base:", st.session_state.menu_diario["tipos_arroz"], horizontal=True, key=f"base_sel_{k}")
+        tipo_arroz_feijao = st.radio("Escolha o acompanhamento base:", menu_diario["tipos_arroz"], horizontal=True, key=f"base_sel_{k}")
 
         st.markdown("**Outros Acompanhamentos:** (desmarque o que **NÃO** deseja)")
         acomps_removidos = []
         
         cols_acomp = st.columns(3)
-        for index, acrod in enumerate(st.session_state.menu_diario["acompanhamentos_padrao"]):
+        for index, acrod in enumerate(menu_diario["acompanhamentos_padrao"]):
             col_target = cols_acomp[index % 3]
             incluir = col_target.checkbox(f"Incluir {acrod}", value=True, key=f"acomp_{acrod}_{k}")
             if not incluir:
@@ -430,7 +414,7 @@ else:
             elif quantidade <= 0:
                 st.error("Por favor, selecione uma quantidade maior que 0.")
             else:
-                preco_unit = st.session_state.menu_diario["preco_marmita"]
+                preco_unit = float(menu_diario["preco_marmita"])
                 preco_total_item = preco_unit * quantidade
                 
                 base_simplificada = tipo_arroz_feijao.lower()
@@ -457,39 +441,6 @@ else:
                 st.session_state.form_refeicao_key += 1
                 st.success("Refeição adicionada ao carrinho com sucesso!")
                 st.rerun()
-
-    st.divider()
-
-    st.markdown("#### 🥤 Sucos e Bebidas (Opcional)")
-    quer_suco = st.checkbox("Deseja adicionar um Suco / Bebida ao seu pedido?")
-
-    if quer_suco:
-        col_s1, col_s2 = st.columns(2)
-        with col_s1:
-            sabor_suco = st.selectbox("Sabor do Suco:", ["Acerola", "Cajá", "Maracujá"])
-        with col_s2:
-            tamanho_suco = st.selectbox("Tamanho do Suco:", ["Copo de 300 ml", "Jarra de 1 L"])
-            
-        chave_tamanho_busca = "Copo (300 ml)" if "Copo" in tamanho_suco else "Jarra (1 L)"
-        chave_preco = f"{sabor_suco} - {chave_tamanho_busca}"
-        preco_suco = st.session_state.precos_sucos.get(chave_preco, 7.00)
-        
-        ponto_acucar = st.radio("Açúcar:", ["Com Açúcar", "Sem Açúcar", "Pouco Açúcar"], horizontal=True)
-        st.info(f"Valor do Suco: **R$ {preco_suco:.2f}**")
-
-        if st.button("➕ Adicionar Suco ao Carrinho"):
-            if not nome_cliente or not telefone_cliente:
-                st.error("Por favor, preencha o seu Nome e Telefone antes de adicionar itens.")
-            else:
-                artigo = "Um" if "copo" in tamanho_suco.lower() else "Uma"
-                desc_suco = f"{artigo} {tamanho_suco.lower()} de suco de {sabor_suco.lower()} {ponto_acucar.lower()}"
-                st.session_state.carrinho_atual.append({
-                    "quantidade": 1,
-                    "item_principal": desc_suco,
-                    "detalhes": "",
-                    "preco": preco_suco
-                })
-                st.success("Suco adicionado ao carrinho!")
 
     st.divider()
 
@@ -545,37 +496,16 @@ else:
                 if forma_pagamento == "Dinheiro" and troco_info:
                     pagamento_texto += f" (Troco para: {troco_info})"
 
-                id_pedido = len(st.session_state.pedidos_clientes) + 1
-                registo = {
-                    "ID": id_pedido,
-                    "Data": date.today().strftime("%Y-%m-%d"),
-                    "Cliente": nome_cliente,
-                    "Telefone": telefone_cliente,
-                    "Horário Retirada": horario_retirada,
-                    "Pedido": texto_itens.replace("\n", " | "),
-                    "Total": total_geral,
-                    "Pagamento": pagamento_texto,
-                    "Nota/Info Formal": info_formal_pagamento,
-                    "Estado": "Pendente"
-                }
-                st.session_state.pedidos_clientes.append(registo)
+                # Salva o pedido no Banco de Dados
+                salvar_pedido(date.today(), nome_cliente, telefone_cliente, horario_retirada, texto_itens.replace("\n", " | "), total_geral, pagamento_texto, info_formal_pagamento)
                 
                 whatsapp_restaurante = "5599981370792"
-                
-                texto_mensagem = f"NOVO PEDIDO :\n" \
-                                 f"Cliente: {nome_cliente}\n" \
-                                 f"Horário de Retirada: {horario_retirada}\n\n" \
-                                 f"{texto_itens}\n\n" \
-                                 f"Forma de Pagamento: {pagamento_texto}\n" \
-                                 f"Informação Formal de Pagamento: {info_formal_pagamento}\n" \
-                                 f"Total Geral: R$ {total_geral:.2f}"
-                
+                texto_mensagem = f"NOVO PEDIDO :\nCliente: {nome_cliente}\nHorário de Retirada: {horario_retirada}\n\n{texto_itens}\n\nForma de Pagamento: {pagamento_texto}\nInformação Formal de Pagamento: {info_formal_pagamento}\nTotal Geral: R$ {total_geral:.2f}"
                 mensagem_formatada = urllib.parse.quote(texto_mensagem)
                 link_whatsapp = f"https://wa.me/{whatsapp_restaurante}?text={mensagem_formatada}"
                 
                 st.session_state.carrinho_atual = []
-                
-                st.success("Pedido registado com sucesso no sistema!")
+                st.success("Pedido registado e salvo com sucesso no banco de dados!")
                 st.markdown(f"### 👉 [Clique aqui para abrir o WhatsApp e enviar o seu pedido]({link_whatsapp})", unsafe_allow_html=True)
 
 # ==========================================
@@ -588,7 +518,7 @@ with st.expander("🔐 Acesso Administrativo (Restrito)"):
     if st.button("Entrar como Administrador"):
         if senha_digitada == "1234":
             st.session_state.modo_admin = True
-            st.success("Acesso liberado! Entrando no painel...")
+            st.success("Acesso liberado!")
             st.rerun()
         else:
             st.error("Senha incorreta!")
