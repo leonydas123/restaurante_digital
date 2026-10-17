@@ -310,7 +310,6 @@ st.markdown("""
         margin-top: 6px;
     }
 
-    /* Efeito 3D para destaques do cardápio */
     .card-3d {
         background: #ffffff;
         border-radius: 16px;
@@ -563,7 +562,6 @@ else:
 
     st.markdown("---")
 
-    # CARDS 3D INTERATIVOS EM DESTAQUE NA TELA
     col_3d_1, col_3d_2 = st.columns(2)
     with col_3d_1:
         st.markdown("""
@@ -657,6 +655,7 @@ else:
         st.divider()
         st.markdown("### 🥤 2️⃣ Sucos e Bebidas (Opcional)")
         
+        # SEÇÃO DE SUCO COM RESET DE QUANTIDADE E AVISO VISUAL DE VERIFICADO
         ks = st.session_state.form_suco_key
         with st.form(key=f"form_suco_{ks}"):
             col_s1, col_s2, col_s3 = st.columns([2, 2, 1])
@@ -693,9 +692,10 @@ else:
                         "preco": preco_total_suco
                     })
                     
+                    # Incrementa a chave do formulário para resetar/zerar os campos imediatamente
                     st.session_state.form_suco_key += 1
+                    st.toast("✅ Suco adicionado com sucesso!", icon="🥤")
                     st.success("✅ Suco adicionado com sucesso ao carrinho!")
-                    st.toast("Suco adicionado!", icon="🥤")
                     st.rerun()
 
     # ---------------------------------------------------------
