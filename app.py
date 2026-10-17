@@ -5,7 +5,6 @@ import urllib.parse
 import sqlite3
 import json
 import re
-import time
 
 # Configuração da página com layout amplo e visual mobile-first
 st.set_page_config(
@@ -45,6 +44,16 @@ def init_db():
             unidade TEXT,
             consumo_por_marmita REAL,
             data TEXT
+        )
+    """)
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fornecedores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT,
+            telefone TEXT,
+            categoria TEXT,
+            observacao TEXT
         )
     """)
     
@@ -158,6 +167,28 @@ def deletar_item_estoque(id_item):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM estoque WHERE id = ?", (id_item,))
+    conn.commit()
+    conn.close()
+
+# FORNECEDORES
+def carregar_fornecedores():
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT * FROM fornecedores ORDER BY id DESC", conn)
+    conn.close()
+    return df.to_dict("records")
+
+def salvar_fornecedor(nome, telefone, categoria, obs):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO fornecedores (nome, telefone, categoria, observacao) VALUES (?, ?, ?, ?)",
+                   (nome, telefone, categoria, obs))
+    conn.commit()
+    conn.close()
+
+def deletar_fornecedor(id_forn):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM fornecedores WHERE id = ?", (id_forn,))
     conn.commit()
     conn.close()
 
@@ -356,7 +387,7 @@ if st.session_state.modo_admin:
     st.markdown("""
         <div class='app-header'>
             <h1>🔒 Painel de Gestão & Administração</h1>
-            <p>Controle do cardápio, recepção de pedidos, estoque e fechamento financeiro.</p>
+            <p>Controle do cardápio, recepção de pedidos, estoque, fornecedores e fechamento financeiro.</p>
         </div>
     """, unsafe_allow_html=True)
     
@@ -366,10 +397,11 @@ if st.session_state.modo_admin:
 
     st.divider()
 
-    admin_tab1, admin_tab2, admin_tab3, admin_tab4 = st.tabs([
+    admin_tab1, admin_tab2, admin_tab3, admin_tab5, admin_tab4 = st.tabs([
         "⚙️ Cardápio & Preços", 
         "📋 Pedidos & Comandas", 
         "📦 Estoque & Conciliação",
+        "🤝 Fornecedores",
         "📊 Fechamento de Caixa"
     ])
     
@@ -499,6 +531,48 @@ if st.session_state.modo_admin:
                 with col_i5:
                     if st.button("🗑️", key=f"del_est_{item_est['id']}"):
                         deletar_item_estoque(item_est['id'])
+                        st.rerun()
+                st.markdown("---")
+
+    # ABA RESTAURADA: FORNECEDORES
+    with admin_tab5:
+        st.markdown("#### 🤝 Gestão de Fornecedores")
+        with st.form("form_novo_fornecedor"):
+            st.markdown("##### ➕ Cadastrar Novo Fornecedor")
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                nome_forn = st.text_input("Nome do Fornecedor / Empresa:")
+                tel_forn = st.text_input("Telefone / WhatsApp com DDD:")
+            with col_f2:
+                cat_forn = st.selectbox("Categoria do Suprimento:", ["Carnes & Proteínas", "Bebidas & Sucos", "Hortifruti & Verduras", "Embalagens", "Geral / Outros"])
+                obs_forn = st.text_input("Observação / Dias de Entrega:")
+                
+            if st.form_submit_button("💾 Salvar Fornecedor", type="primary"):
+                if not nome_forn:
+                    st.error("Informe o nome do fornecedor.")
+                else:
+                    salvar_fornecedor(nome_forn, tel_forn, cat_forn, obs_forn)
+                    st.success("Fornecedor cadastrado com sucesso!")
+                    st.rerun()
+                    
+        st.divider()
+        st.markdown("##### 📋 Fornecedores Cadastrados")
+        lista_fornec = carregar_fornecedores()
+        if not lista_fornec:
+            st.info("Nenhum fornecedor cadastrado até o momento.")
+        else:
+            for forn in lista_fornec:
+                col_lf1, col_lf2, col_lf3, col_lf4 = st.columns([3, 2, 3, 1])
+                with col_lf1:
+                    st.write(f"• **{forn['nome']}**")
+                    st.caption(f"Categoria: {forn['categoria']}")
+                with col_lf2:
+                    st.write(f"📱 {forn['telefone']}")
+                with col_lf3:
+                    st.write(f"📝 {forn['observacao']}")
+                with col_lf4:
+                    if st.button("🗑️", key=f"del_forn_{forn['id']}"):
+                        deletar_fornecedor(forn['id'])
                         st.rerun()
                 st.markdown("---")
 
