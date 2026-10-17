@@ -358,8 +358,8 @@ if "modo_admin" not in st.session_state:
 if "form_refeicao_key" not in st.session_state:
     st.session_state.form_refeicao_key = 0
 
-if "processando_clique" not in st.session_state:
-    st.session_state.processando_clique = False
+if "form_suco_key" not in st.session_state:
+    st.session_state.form_suco_key = 0
 
 menu_diario = carregar_config("menu_diario")
 precos_sucos = carregar_config("precos_sucos")
@@ -561,7 +561,7 @@ else:
     )
 
     # ---------------------------------------------------------
-    # MODO 1: TRADICIONAL (MANUAL COM REFEIÇÕES E SUCOS)
+    # MODO 1: TRADICIONAL (MANUAL COM REFEIÇÕES E SUCOS PROTEGIDOS)
     # ---------------------------------------------------------
     if modo_pedido == "📝 Modo Tradicional (Manual)":
         st.markdown("### 🥗 1️⃣ Monte a sua Refeição")
@@ -589,14 +589,11 @@ else:
             obs_marmita = st.text_input("Observação / Preferência (ex: 'Caprichar no caldo'):", key=f"obs_input_{k}")
 
             if st.button("➕ Adicionar Refeição ao Carrinho", type="primary"):
-                if st.session_state.processando_clique:
-                    st.warning("Aguarde, processando...")
-                elif not nome_cliente or not telefone_cliente:
+                if not nome_cliente or not telefone_cliente:
                     st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
                 elif quantidade <= 0:
                     st.error("Selecione uma quantidade maior que 0.")
                 else:
-                    st.session_state.processando_clique = True
                     preco_unit = float(menu_diario["preco_marmita"])
                     preco_total_item = preco_unit * quantidade
                     
@@ -624,45 +621,51 @@ else:
                     st.session_state.form_refeicao_key += 1
                     st.success("✅ Refeição adicionada com sucesso ao carrinho!")
                     st.toast("Refeição adicionada!", icon="🍽️")
-                    st.session_state.processando_clique = False
                     st.rerun()
 
         st.divider()
         st.markdown("### 🥤 2️⃣ Sucos e Bebidas (Opcional)")
-        quer_suco = st.checkbox("Deseja adicionar um Suco ao seu pedido?")
-
-        if quer_suco:
-            col_s1, col_s2 = st.columns(2)
+        
+        # FORMULÁRIO COM SELETOR DE QUANTIDADE E PROTEÇÃO CONTRA DUPLO CLIQUE
+        ks = st.session_state.form_suco_key
+        with st.form(key=f"form_suco_{ks}"):
+            col_s1, col_s2, col_s3 = st.columns([2, 2, 1])
             with col_s1:
                 sabor_suco = st.selectbox("Sabor do Suco:", ["Acerola", "Cajá", "Maracujá"])
             with col_s2:
-                tamanho_suco = st.selectbox("Tamanho do Suco:", ["Copo de 300 ml", "Jarra de 1 L"])
+                tamanho_suco = st.selectbox("Tamanho:", ["Copo de 300 ml", "Jarra de 1 L"])
+            with col_s3:
+                qtd_suco = st.number_input("Qtd:", min_value=1, value=1, step=1)
                 
             chave_tamanho_busca = "Copo (300 ml)" if "Copo" in tamanho_suco else "Jarra (1 L)"
             chave_preco = f"{sabor_suco} - {chave_tamanho_busca}"
-            preco_suco = float(precos_sucos.get(chave_preco, 7.00))
+            preco_unit_suco = float(precos_sucos.get(chave_preco, 7.00))
+            preco_total_suco = preco_unit_suco * qtd_suco
             
             ponto_acucar = st.radio("Açúcar:", ["Com Açúcar", "Sem Açúcar", "Pouco Açúcar"], horizontal=True)
-            st.info(f"Valor do Suco: **R$ {preco_suco:.2f}**")
+            st.info(f"Valor Total ({qtd_suco}x): **R$ {preco_total_suco:.2f}**")
 
-            if st.button("➕ Adicionar Suco ao Carrinho"):
-                if st.session_state.processando_clique:
-                    st.warning("Aguarde, processando...")
-                elif not nome_cliente or not telefone_cliente:
+            btn_add_suco = st.form_submit_button("➕ Adicionar Suco ao Carrinho", type="primary")
+
+            if btn_add_suco:
+                if not nome_cliente or not telefone_cliente:
                     st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
                 else:
-                    st.session_state.processando_clique = True
-                    artigo = "Um" if "copo" in tamanho_suco.lower() else "Uma"
-                    desc_suco = f"{artigo} {tamanho_suco.lower()} de suco de {sabor_suco.lower()} ({ponto_acucar.lower()})"
+                    tipo_recipiente = "copo" if "copo" in tamanho_suco.lower() else "jarra"
+                    unidade_medida = "300 ml" if "copo" in tamanho_suco.lower() else "1 L"
+                    
+                    desc_suco = f"{qtd_suco} {tipo_recipiente}(s) de {unidade_medida} de suco de {sabor_suco.lower()} ({ponto_acucar.lower()})"
+                    
                     st.session_state.carrinho_atual.append({
-                        "quantidade": 1,
+                        "quantidade": qtd_suco,
                         "item_principal": desc_suco,
                         "detalhes": "",
-                        "preco": preco_suco
+                        "preco": preco_total_suco
                     })
+                    
+                    st.session_state.form_suco_key += 1
                     st.success("✅ Suco adicionado com sucesso ao carrinho!")
                     st.toast("Suco adicionado!", icon="🥤")
-                    st.session_state.processando_clique = False
                     st.rerun()
 
     # ---------------------------------------------------------
@@ -678,14 +681,11 @@ else:
         )
 
         if st.button("⚡ Processar e Adicionar Pedido ao Carrinho"):
-            if st.session_state.processando_clique:
-                st.warning("Aguarde, processando...")
-            elif not nome_cliente or not telefone_cliente:
+            if not nome_cliente or not telefone_cliente:
                 st.error("Por favor, preencha o seu Nome e Telefone no topo da página.")
             elif not texto_fala.strip():
                 st.warning("Digite ou dite o seu pedido primeiro.")
             else:
-                st.session_state.processando_clique = True
                 preco_base = float(menu_diario["preco_marmita"])
                 itens_detectados = processar_fala_inteligente(texto_fala, preco_base, precos_sucos)
                 
@@ -694,7 +694,6 @@ else:
                     
                 st.success(f"✨ {len(itens_detectados)} item(ns) identificados e adicionados com sucesso!")
                 st.toast("Pedido inteligente adicionado!", icon="⚡")
-                st.session_state.processando_clique = False
                 st.rerun()
 
     st.divider()
