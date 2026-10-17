@@ -215,6 +215,68 @@ def atualizar_status_pedido(id_ped, novo_estado):
     conn.close()
 
 # ==========================================
+# PARSER INTELIGENTE DE ÁUDIO / TEXTO LIVRE
+# ==========================================
+def processar_fala_inteligente(texto_fala, preco_marmita_base, precos_sucos_dict):
+    itens_extraidos = []
+    texto = texto_fala.lower()
+    
+    # 1. Busca por Suco / Bebida no texto
+    preco_suco_encontrado = 0.0
+    suco_desc = ""
+    
+    for chave_suco, preco_suco in precos_sucos_dict.items():
+        sabor = chave_suco.split(" - ")[0].lower()
+        if sabor in texto:
+            if "jarra" in texto or "1 l" in texto:
+                if "jarra" in chave_suco.lower() or "1 l" in chave_suco.lower():
+                    suco_desc = f"1x Suco de {sabor.capitalize()} (Jarra 1L)"
+                    preco_suco_encontrado = float(preco_suco)
+                    break
+            else:
+                if "copo" in chave_suco.lower() or "300 ml" in chave_suco.lower():
+                    suco_desc = f"1x Suco de {sabor.capitalize()} (Copo 300ml)"
+                    preco_suco_encontrado = float(preco_suco)
+                    break
+
+    if suco_desc and preco_suco_encontrado > 0:
+        itens_extraidos.append({
+            "quantidade": 1,
+            "item_principal": suco_desc,
+            "detalhes": "Adicionado via Pedido por Áudio",
+            "preco": preco_suco_encontrado
+        })
+
+    # 2. Contagem Inteligente de Marmitas
+    qtd_marmitas = 0
+    if "duas" in texto or "2" in texto or "outro" in texto or "outra" in texto:
+        qtd_marmitas = 2
+    elif "tres" in texto or "três" in texto or "3" in texto:
+        qtd_marmitas = 3
+    elif "quatro" in texto or "4" in texto:
+        qtd_marmitas = 4
+    else:
+        qtd_marmitas = 1
+
+    # Quebra o texto por frases para separar os detalhes de cada marmita
+    partes = re.split(r'e|uma|outra|\,', texto)
+    partes_marmitas = [p.strip() for p in partes if ("costela" in p or "carne" in p or "feijão" in p or "marmita" in p or "salada" in p)]
+    
+    if not partes_marmitas:
+        partes_marmitas = [texto_fala]
+
+    for i in range(min(qtd_marmitas, len(partes_marmitas) if len(partes_marmitas) > 1 else qtd_marmitas)):
+        detalhe_item = partes_marmitas[i] if i < len(partes_marmitas) else partes_marmitas[0]
+        itens_extraidos.append({
+            "quantidade": 1,
+            "item_principal": f"1x Refeição Marmita #{i+1}",
+            "detalhes": detalhe_item.strip().capitalize(),
+            "preco": float(preco_marmita_base)
+        })
+
+    return itens_extraidos
+
+# ==========================================
 # DESIGN E ESTILO CSS ULTRA MODERNO
 # ==========================================
 st.markdown("""
@@ -550,15 +612,15 @@ else:
                     st.rerun()
 
     # ---------------------------------------------------------
-    # MODO 2: INTELIGENTE POR VOZ / TEXTO LIVRE
+    # MODO 2: INTELIGENTE POR VOZ / TEXTO LIVRE (COM MULTI-ITENS E PREÇOS CORRETOS)
     # ---------------------------------------------------------
     else:
         st.markdown("### 🎙️ Fale ou Digite o seu Pedido Completo")
-        st.info("💡 **Exemplo:** 'Quero duas costelas, uma com feijão de caldo sem macarrão e a outra sem feijão. Adiciona também uma jarra de suco de acerola.'")
+        st.info("💡 **Exemplo:** 'Quero uma costela com feijão de caldo, outra costela sem feijão e sem salada e um copo de acerola.'")
         
         texto_fala = st.text_area(
             "Digite ou clique no microfone do teclado do seu celular para ditar o pedido:",
-            placeholder="Exemplo: Quero uma costela com arroz misturado e um copo de acerola..."
+            placeholder="Exemplo: Quero uma costela com feijão de caldo outra costela sem feijao e sem salada e um copo de acerola"
         )
 
         if st.button("⚡ Processar e Adicionar Pedido ao Carrinho"):
@@ -567,15 +629,13 @@ else:
             elif not texto_fala.strip():
                 st.warning("Digite ou dite o seu pedido primeiro.")
             else:
-                preco_unit = float(menu_diario["preco_marmita"])
+                preco_base = float(menu_diario["preco_marmita"])
+                itens_detectados = processar_fala_inteligente(texto_fala, preco_base, precos_sucos)
                 
-                st.session_state.carrinho_atual.append({
-                    "quantidade": 1,
-                    "item_principal": "Pedido falado / texto inteligente:",
-                    "detalhes": texto_fala.strip(),
-                    "preco": preco_unit
-                })
-                st.success("Pedido por voz/texto adicionado com sucesso ao carrinho!")
+                for item_det in itens_detectados:
+                    st.session_state.carrinho_atual.append(item_det)
+                    
+                st.success(f"✨ {len(itens_detectados)} item(ns) identificados e adicionados ao carrinho com valores corretos!")
                 st.rerun()
 
     st.divider()
@@ -621,9 +681,9 @@ else:
             else:
                 linhas_pedido = []
                 for it in st.session_state.carrinho_atual:
-                    linha = it["item_principal"]
+                    linha = f"{it['item_principal']} - R$ {it['preco']:.2f}"
                     if it["detalhes"]:
-                        linha += f"\n{it['detalhes']}"
+                        linha += f"\n  Detalhes: {it['detalhes']}"
                     linhas_pedido.append(linha)
                 
                 texto_itens = "\n\n".join(linhas_pedido)
