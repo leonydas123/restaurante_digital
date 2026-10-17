@@ -4,6 +4,7 @@ from datetime import date
 import urllib.parse
 import sqlite3
 import json
+import re
 
 # Configuração da página com layout amplo e visual mobile-first
 st.set_page_config(
@@ -214,18 +215,78 @@ def atualizar_status_pedido(id_ped, novo_estado):
     conn.close()
 
 # ==========================================
+# PARSER INTELIGENTE DE ÁUDIO / TEXTO LIVRE
+# ==========================================
+def processar_fala_inteligente(texto_fala, preco_marmita_base, precos_sucos_dict):
+    itens_extraidos = []
+    texto = texto_fala.lower()
+    
+    # 1. Busca por Suco / Bebida no texto
+    preco_suco_encontrado = 0.0
+    suco_desc = ""
+    
+    for chave_suco, preco_suco in precos_sucos_dict.items():
+        sabor = chave_suco.split(" - ")[0].lower()
+        if sabor in texto:
+            if "jarra" in texto or "1 l" in texto:
+                if "jarra" in chave_suco.lower() or "1 l" in chave_suco.lower():
+                    suco_desc = f"1x Suco de {sabor.capitalize()} (Jarra 1L)"
+                    preco_suco_encontrado = float(preco_suco)
+                    break
+            else:
+                if "copo" in chave_suco.lower() or "300 ml" in chave_suco.lower():
+                    suco_desc = f"1x Suco de {sabor.capitalize()} (Copo 300ml)"
+                    preco_suco_encontrado = float(preco_suco)
+                    break
+
+    if suco_desc and preco_suco_encontrado > 0:
+        itens_extraidos.append({
+            "quantidade": 1,
+            "item_principal": suco_desc,
+            "detalhes": "Adicionado via Pedido por Áudio",
+            "preco": preco_suco_encontrado
+        })
+
+    # 2. Contagem Inteligente de Marmitas
+    qtd_marmitas = 0
+    if "duas" in texto or "2" in texto or "outro" in texto or "outra" in texto:
+        qtd_marmitas = 2
+    elif "tres" in texto or "três" in texto or "3" in texto:
+        qtd_marmitas = 3
+    elif "quatro" in texto or "4" in texto:
+        qtd_marmitas = 4
+    else:
+        qtd_marmitas = 1
+
+    # Quebra o texto por frases para separar os detalhes de cada marmita
+    partes = re.split(r'e|uma|outra|\,', texto)
+    partes_marmitas = [p.strip() for p in partes if ("costela" in p or "carne" in p or "feijão" in p or "marmita" in p or "salada" in p)]
+    
+    if not partes_marmitas:
+        partes_marmitas = [texto_fala]
+
+    for i in range(min(qtd_marmitas, len(partes_marmitas) if len(partes_marmitas) > 1 else qtd_marmitas)):
+        detalhe_item = partes_marmitas[i] if i < len(partes_marmitas) else partes_marmitas[0]
+        itens_extraidos.append({
+            "quantidade": 1,
+            "item_principal": f"1x Refeição Marmita #{i+1}",
+            "detalhes": detalhe_item.strip().capitalize(),
+            "preco": float(preco_marmita_base)
+        })
+
+    return itens_extraidos
+
+# ==========================================
 # DESIGN E ESTILO CSS ULTRA MODERNO
 # ==========================================
 st.markdown("""
     <style>
-    /* Estilo Geral de Fundo e Tipografia */
     .main {
         background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         color: #1e293b;
     }
     
-    /* Header do Aplicativo */
     .app-header {
         background: linear-gradient(135deg, #059669 0%, #10b981 100%);
         padding: 24px;
@@ -240,46 +301,13 @@ st.markdown("""
         font-size: 2.2rem;
         font-weight: 800;
         margin: 0;
-        letter-spacing: -0.5px;
     }
     .app-header p {
         color: #e6f4ea;
         font-size: 1.05rem;
         margin-top: 6px;
-        margin-bottom: 0;
     }
 
-    /* Cards e Containers com Sombra Suave */
-    .custom-card {
-        background: #ffffff;
-        padding: 20px;
-        border-radius: 16px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
-        border: 1px solid #f1f5f9;
-        margin-bottom: 20px;
-    }
-
-    /* Cartão de Item de Carrinho */
-    .cart-card {
-        background: #ffffff;
-        border-left: 5px solid #10b981;
-        padding: 16px;
-        border-radius: 12px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-        margin-bottom: 12px;
-    }
-
-    /* Métricas do Dashboard Admin */
-    .stMetric {
-        background: #ffffff !important;
-        padding: 18px !important;
-        border-radius: 16px !important;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.04) !important;
-        border: 1px solid #e2e8f0 !important;
-        border-left: 6px solid #10b981 !important;
-    }
-
-    /* Botões Principais */
     .stButton>button {
         border-radius: 12px !important;
         font-weight: 700 !important;
@@ -296,7 +324,6 @@ st.markdown("""
         box-shadow: 0 6px 18px rgba(16, 185, 129, 0.35) !important;
     }
 
-    /* Expansores Elegantes */
     div[data-testid="stExpander"] {
         background-color: #ffffff !important;
         border-radius: 14px !important;
@@ -305,18 +332,6 @@ st.markdown("""
         margin-bottom: 12px !important;
     }
 
-    /* Alerta de Estoque */
-    .alerta-estoque {
-        background-color: #fef2f2;
-        border-left: 5px solid #ef4444;
-        padding: 14px;
-        border-radius: 12px;
-        color: #991b1b;
-        font-weight: 600;
-        margin-bottom: 15px;
-    }
-    
-    /* Abas de Navegação */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
     }
@@ -431,7 +446,7 @@ if st.session_state.modo_admin:
         estoque_atual = carregar_estoque()
         itens_criticos = [i for i in estoque_atual if i['qtd'] <= (5.0 if i['unidade'] == 'KG' else 10.0)]
         if itens_criticos:
-            st.markdown("<div class='alerta-estoque'>⚠️ ATENÇÃO: Itens com estoque baixo detectados!</div>", unsafe_allow_html=True)
+            st.markdown("<div style='background-color:#fef2f2; border-left:5px solid #ef4444; padding:14px; border-radius:12px; color:#991b1b; font-weight:600;'>⚠️ ATENÇÃO: Itens com estoque baixo detectados!</div>", unsafe_allow_html=True)
             for ic in itens_criticos:
                 st.write(f"• **{ic['item']}**: Restam apenas **{ic['qtd']} {ic['unidade']}**")
             st.divider()
@@ -510,7 +525,7 @@ else:
     st.markdown("""
         <div class='app-header'>
             <h1>🍽️ Restaurante Digital</h1>
-            <p>Escolha seus pratos favoritos, monte seu pedido e envie direto para o nosso WhatsApp!</p>
+            <p>Monte seu pedido clicando nas opções ou falando por voz/texto inteligente!</p>
         </div>
     """, unsafe_allow_html=True)
     
@@ -526,63 +541,101 @@ else:
         st.session_state.carrinho_atual = []
 
     st.markdown("---")
-    st.markdown("### 🥗 1️⃣ Monte a sua Refeição")
     
-    k = st.session_state.form_refeicao_key
+    # SELETOR DE MODO DE PEDIDO (MANUAL OU VOZ / TEXTO INTELIGENTE)
+    modo_pedido = st.radio(
+        "Como prefere fazer o seu pedido?",
+        ["📝 Modo Tradicional (Manual)", "🎙️ Modo Inteligente por Voz / Texto Livre"],
+        horizontal=True
+    )
 
-    with st.container():
-        col_qtd, col_carne = st.columns([1, 3])
-        with col_qtd:
-            quantidade = st.number_input("Quantidade:", min_value=0, value=0, step=1, key=f"qtd_marmita_{k}")
-        with col_carne:
-            carne_escolhida = st.selectbox("Escolha a Opção de Carne:", menu_diario["carnes"], key=f"carne_sel_{k}")
-        
-        tipo_arroz_feijao = st.radio("Escolha a Base do Prato:", menu_diario["tipos_arroz"], horizontal=True, key=f"base_sel_{k}")
+    # ---------------------------------------------------------
+    # MODO 1: TRADICIONAL (MANUAL COM BOTÕES)
+    # ---------------------------------------------------------
+    if modo_pedido == "📝 Modo Tradicional (Manual)":
+        st.markdown("### 🥗 1️⃣ Monte a sua Refeição")
+        k = st.session_state.form_refeicao_key
 
-        st.markdown("**Acompanhamentos:** (desmarque se **NÃO** desejar)")
-        acomps_removidos = []
-        
-        cols_acomp = st.columns(3)
-        for index, acrod in enumerate(menu_diario["acompanhamentos_padrao"]):
-            col_target = cols_acomp[index % 3]
-            incluir = col_target.checkbox(f"Incluir {acrod}", value=True, key=f"acomp_{acrod}_{k}")
-            if not incluir:
-                acomps_removidos.append(acrod)
-                
-        obs_marmita = st.text_input("Observação / Preferência (ex: 'Caprichar no caldo'):", key=f"obs_input_{k}")
+        with st.container():
+            col_qtd, col_carne = st.columns([1, 3])
+            with col_qtd:
+                quantidade = st.number_input("Quantidade:", min_value=0, value=0, step=1, key=f"qtd_marmita_{k}")
+            with col_carne:
+                carne_escolhida = st.selectbox("Escolha a Opção de Carne:", menu_diario["carnes"], key=f"carne_sel_{k}")
+            
+            tipo_arroz_feijao = st.radio("Escolha a Base do Prato:", menu_diario["tipos_arroz"], horizontal=True, key=f"base_sel_{k}")
 
-        if st.button("➕ Adicionar Refeição ao Carrinho", type="primary"):
-            if not nome_cliente or not telefone_cliente:
-                st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
-            elif quantidade <= 0:
-                st.error("Selecione uma quantidade maior que 0.")
-            else:
-                preco_unit = float(menu_diario["preco_marmita"])
-                preco_total_item = preco_unit * quantidade
-                
-                base_simplificada = tipo_arroz_feijao.lower()
-                if "misturado" in base_simplificada or "baião" in base_simplificada:
-                    base_simplificada = "com arroz misturado"
-                
-                desc_principal = f"{quantidade} {carne_escolhida.lower()} {base_simplificada}"
-                
-                detalhes = []
-                if len(acomps_removidos) > 0:
-                    detalhes.append(f"sem {', '.join(acomps_removidos).lower()}")
-                if obs_marmita:
-                    detalhes.append(obs_marmita)
+            st.markdown("**Acompanhamentos:** (desmarque se **NÃO** desejar)")
+            acomps_removidos = []
+            
+            cols_acomp = st.columns(3)
+            for index, acrod in enumerate(menu_diario["acompanhamentos_padrao"]):
+                col_target = cols_acomp[index % 3]
+                incluir = col_target.checkbox(f"Incluir {acrod}", value=True, key=f"acomp_{acrod}_{k}")
+                if not incluir:
+                    acomps_removidos.append(acrod)
                     
-                texto_detalhes = " e ".join(detalhes).capitalize() if detalhes else ""
+            obs_marmita = st.text_input("Observação / Preferência (ex: 'Caprichar no caldo'):", key=f"obs_input_{k}")
+
+            if st.button("➕ Adicionar Refeição ao Carrinho", type="primary"):
+                if not nome_cliente or not telefone_cliente:
+                    st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
+                elif quantidade <= 0:
+                    st.error("Selecione uma quantidade maior que 0.")
+                else:
+                    preco_unit = float(menu_diario["preco_marmita"])
+                    preco_total_item = preco_unit * quantidade
+                    
+                    base_simplificada = tipo_arroz_feijao.lower()
+                    if "misturado" in base_simplificada or "baião" in base_simplificada:
+                        base_simplificada = "com arroz misturado"
+                    
+                    desc_principal = f"{quantidade} {carne_escolhida.lower()} {base_simplificada}"
+                    
+                    detalhes = []
+                    if len(acomps_removidos) > 0:
+                        detalhes.append(f"sem {', '.join(acomps_removidos).lower()}")
+                    if obs_marmita:
+                        detalhes.append(obs_marmita)
+                        
+                    texto_detalhes = " e ".join(detalhes).capitalize() if detalhes else ""
+                    
+                    st.session_state.carrinho_atual.append({
+                        "quantidade": quantidade,
+                        "item_principal": desc_principal,
+                        "detalhes": texto_detalhes,
+                        "preco": preco_total_item
+                    })
+                    
+                    st.session_state.form_refeicao_key += 1
+                    st.success("Refeição adicionada ao carrinho!")
+                    st.rerun()
+
+    # ---------------------------------------------------------
+    # MODO 2: INTELIGENTE POR VOZ / TEXTO LIVRE (COM MULTI-ITENS E PREÇOS CORRETOS)
+    # ---------------------------------------------------------
+    else:
+        st.markdown("### 🎙️ Fale ou Digite o seu Pedido Completo")
+        st.info("💡 **Exemplo:** 'Quero uma costela com feijão de caldo, outra costela sem feijão e sem salada e um copo de acerola.'")
+        
+        texto_fala = st.text_area(
+            "Digite ou clique no microfone do teclado do seu celular para ditar o pedido:",
+            placeholder="Exemplo: Quero uma costela com feijão de caldo outra costela sem feijao e sem salada e um copo de acerola"
+        )
+
+        if st.button("⚡ Processar e Adicionar Pedido ao Carrinho"):
+            if not nome_cliente or not telefone_cliente:
+                st.error("Por favor, preencha o seu Nome e Telefone no topo da página.")
+            elif not texto_fala.strip():
+                st.warning("Digite ou dite o seu pedido primeiro.")
+            else:
+                preco_base = float(menu_diario["preco_marmita"])
+                itens_detectados = processar_fala_inteligente(texto_fala, preco_base, precos_sucos)
                 
-                st.session_state.carrinho_atual.append({
-                    "quantidade": quantidade,
-                    "item_principal": desc_principal,
-                    "detalhes": texto_detalhes,
-                    "preco": preco_total_item
-                })
-                
-                st.session_state.form_refeicao_key += 1
-                st.success("Refeição adicionada ao carrinho!")
+                for item_det in itens_detectados:
+                    st.session_state.carrinho_atual.append(item_det)
+                    
+                st.success(f"✨ {len(itens_detectados)} item(ns) identificados e adicionados ao carrinho com valores corretos!")
                 st.rerun()
 
     st.divider()
@@ -628,9 +681,9 @@ else:
             else:
                 linhas_pedido = []
                 for it in st.session_state.carrinho_atual:
-                    linha = it["item_principal"]
+                    linha = f"{it['item_principal']} - R$ {it['preco']:.2f}"
                     if it["detalhes"]:
-                        linha += f"\n{it['detalhes']}"
+                        linha += f"\n  Detalhes: {it['detalhes']}"
                     linhas_pedido.append(linha)
                 
                 texto_itens = "\n\n".join(linhas_pedido)
@@ -647,7 +700,7 @@ else:
                 link_whatsapp = f"https://wa.me/{whatsapp_restaurante}?text={mensagem_formatada}"
                 
                 st.session_state.carrinho_atual = []
-                st.success("Pedido gravado com sucesso!")
+                st.success("Pedido registrado com sucesso!")
                 st.markdown(f"### 👉 [Clique aqui para abrir o WhatsApp e enviar o seu pedido]({link_whatsapp})", unsafe_allow_html=True)
 
 # ==========================================
