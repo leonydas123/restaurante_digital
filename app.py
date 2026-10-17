@@ -58,17 +58,6 @@ def init_db():
     """)
     
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS gastos_donos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            data TEXT,
-            descricao TEXT,
-            categoria TEXT,
-            valor REAL,
-            responsavel TEXT
-        )
-    """)
-    
-    cursor.execute("""
         CREATE TABLE IF NOT EXISTS pedidos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             data TEXT,
@@ -200,28 +189,6 @@ def deletar_fornecedor(id_forn):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM fornecedores WHERE id = ?", (id_forn,))
-    conn.commit()
-    conn.close()
-
-# GASTOS DOS DONOS
-def carregar_gastos_donos():
-    conn = get_db_connection()
-    df = pd.read_sql_query("SELECT * FROM gastos_donos ORDER BY id DESC", conn)
-    conn.close()
-    return df.to_dict("records")
-
-def salvar_gasto_dono(data_gasto, desc, cat, valor, resp):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO gastos_donos (data, descricao, categoria, valor, responsavel) VALUES (?, ?, ?, ?, ?)",
-                   (str(data_gasto), desc, cat, float(valor), resp))
-    conn.commit()
-    conn.close()
-
-def deletar_gasto_dono(id_gasto):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM gastos_donos WHERE id = ?", (id_gasto,))
     conn.commit()
     conn.close()
 
@@ -401,9 +368,6 @@ st.markdown("""
 if "modo_admin" not in st.session_state:
     st.session_state.modo_admin = False
 
-if "acesso_donos_liberado" not in st.session_state:
-    st.session_state.acesso_donos_liberado = False
-
 if "form_refeicao_key" not in st.session_state:
     st.session_state.form_refeicao_key = 0
 
@@ -423,24 +387,22 @@ if st.session_state.modo_admin:
     st.markdown("""
         <div class='app-header'>
             <h1>🔒 Painel de Gestão & Administração</h1>
-            <p>Controle do cardápio, recepção de pedidos, estoque, fornecedores, caixa e área dos donos.</p>
+            <p>Controle do cardápio, recepção de pedidos, estoque, fornecedores e fechamento financeiro.</p>
         </div>
     """, unsafe_allow_html=True)
     
     if st.button("⬅️ Voltar para a Visão do Cliente"):
         st.session_state.modo_admin = False
-        st.session_state.acesso_donos_liberado = False
         st.rerun()
 
     st.divider()
 
-    admin_tab1, admin_tab2, admin_tab3, admin_tab5, admin_tab4, admin_tab6 = st.tabs([
+    admin_tab1, admin_tab2, admin_tab3, admin_tab5, admin_tab4 = st.tabs([
         "⚙️ Cardápio & Preços", 
         "📋 Pedidos & Comandas", 
         "📦 Estoque & Conciliação",
         "🤝 Fornecedores",
-        "📊 Fechamento de Caixa",
-        "🔑 Área Restrita dos Donos"
+        "📊 Fechamento de Caixa"
     ])
     
     with admin_tab1:
@@ -572,6 +534,7 @@ if st.session_state.modo_admin:
                         st.rerun()
                 st.markdown("---")
 
+    # ABA RESTAURADA: FORNECEDORES
     with admin_tab5:
         st.markdown("#### 🤝 Gestão de Fornecedores")
         with st.form("form_novo_fornecedor"):
@@ -625,67 +588,6 @@ if st.session_state.modo_admin:
             st.metric(label="💰 Vendas Concluídas", value=f"R$ {total_pagos:.2f}")
         with col_m2:
             st.metric(label="📦 Total de Pedidos Faturados", value=len(df_vendas))
-
-    # ABA RESTRITA DOS DONOS (PROTEGIDA POR SENHA)
-    with admin_tab6:
-        st.markdown("#### 🔑 Área Restrita dos Sócios & Gestão de Funcionários")
-        
-        if not st.session_state.acesso_donos_liberado:
-            st.warning("⚠️ Esta área é restrita e contém informações financeiras confidenciais e gastos com colaboradores.")
-            senha_donos = st.text_input("Digite a Senha Exclusiva dos Donos:", type="password", key="input_senha_donos")
-            if st.button("Liberar Acesso dos Donos"):
-                if senha_donos == "9988": # Senha específica dos donos
-                    st.session_state.acesso_donos_liberado = True
-                    st.success("Acesso liberado com sucesso!")
-                    st.rerun()
-                else:
-                    st.error("Senha dos donos incorreta!")
-        else:
-            st.success("🔓 Área dos Donos Autenticada")
-            
-            with st.form("form_gasto_dono"):
-                st.markdown("##### ➕ Registrar Gasto / Pró-Labore / Funcionários")
-                col_gd1, col_gd2 = st.columns(2)
-                with col_gd1:
-                    desc_gasto = st.text_input("Descrição do Gasto (ex: Salario Cozinheiro, Pró-labore):")
-                    cat_gasto = st.selectbox("Categoria:", ["Funcionários & Salários", "Retirada de Sócios", "Manutenção", "Impostos & Taxas", "Outros"])
-                with col_gd2:
-                    valor_gasto = st.text_input("Valor (R$):", value="0.00")
-                    resp_gasto = st.text_input("Responsável / Beneficiário:")
-                    data_gasto = st.date_input("Data:", value=date.today())
-
-                if st.form_submit_button("💾 Salvar Registro Financeiro", type="primary"):
-                    val_convertido = parse_float(valor_gasto)
-                    if not desc_gasto or val_convertido <= 0:
-                        st.error("Preencha a descrição e um valor válido.")
-                    else:
-                        salvar_gasto_dono(data_gasto, desc_gasto, cat_gasto, val_convertido, resp_gasto)
-                        st.success("Gasto registrado com sucesso na área restrita!")
-                        st.rerun()
-
-            st.divider()
-            st.markdown("##### 📋 Histórico de Gastos & Funcionários Registrados")
-            lista_gastos = carregar_gastos_donos()
-            if not lista_gastos:
-                st.info("Nenhum registro encontrado.")
-            else:
-                total_gastos_geral = 0.0
-                for g in lista_gastos:
-                    col_g1, col_g2, col_g3, col_g4 = st.columns([3, 2, 2, 1])
-                    with col_g1:
-                        st.write(f"• **{g['descricao']}**")
-                        st.caption(f"Cat: {g['categoria']} | Beneficiário: {g['responsavel']} | Data: {g['data']}")
-                    with col_g2:
-                        st.write(f"**R$ {g['valor']:.2f}**")
-                    with col_g3:
-                        st.write("")
-                    with col_g4:
-                        if st.button("🗑️", key=f"del_gasto_{g['id']}"):
-                            deletar_gasto_dono(g['id'])
-                            st.rerun()
-                    total_gastos_geral += g['valor']
-                    st.markdown("---")
-                st.markdown(f"### 📉 **Total de Gastos / Funcionários: R$ {total_gastos_geral:.2f}**")
 
 # ==========================================
 # VISÃO DO CLIENTE (INTERFACE PRINCIPAL)
@@ -747,4 +649,209 @@ else:
 
             if st.button("➕ Adicionar Refeição ao Carrinho", type="primary"):
                 if not nome_cliente or not telefone_cliente:
-                    st.error("Por favor, preencha o
+                    st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
+                elif quantidade <= 0:
+                    st.error("Selecione uma quantidade maior que 0.")
+                else:
+                    preco_unit = float(menu_diario["preco_marmita"])
+                    preco_total_item = preco_unit * quantidade
+                    
+                    base_simplificada = tipo_arroz_feijao.lower()
+                    if "misturado" in base_simplificada or "baião" in base_simplificada:
+                        base_simplificada = "com arroz misturado"
+                    
+                    desc_principal = f"{quantidade} {carne_escolhida.lower()} {base_simplificada}"
+                    
+                    detalhes = []
+                    if len(acomps_removidos) > 0:
+                        detalhes.append(f"sem {', '.join(acomps_removidos).lower()}")
+                    if obs_marmita:
+                        detalhes.append(obs_marmita)
+                        
+                    texto_detalhes = " e ".join(detalhes).capitalize() if detalhes else ""
+                    
+                    st.session_state.carrinho_atual.append({
+                        "quantidade": quantidade,
+                        "item_principal": desc_principal,
+                        "detalhes": texto_detalhes,
+                        "preco": preco_total_item
+                    })
+                    
+                    st.session_state.form_refeicao_key += 1
+                    st.toast("Refeição adicionada!", icon="🍽️")
+                    st.success("✅ Refeição adicionada com sucesso ao carrinho!")
+                    st.rerun()
+
+        st.divider()
+        st.markdown("### 🥤 2️⃣ Sucos e Bebidas (Opcional)")
+        
+        # FORMULÁRIO DE SUCO COM QUANTIDADE ZERADA INICIALMENTE
+        ks = st.session_state.form_suco_key
+        with st.form(key=f"form_suco_{ks}"):
+            col_s1, col_s2, col_s3 = st.columns([2, 2, 1])
+            with col_s1:
+                sabor_suco = st.selectbox("Sabor do Suco:", ["Acerola", "Cajá", "Maracujá"])
+            with col_s2:
+                tamanho_suco = st.selectbox("Tamanho:", ["Copo de 300 ml", "Jarra de 1 L"])
+            with col_s3:
+                qtd_suco = st.number_input("Qtd:", min_value=0, value=0, step=1)
+                
+            chave_tamanho_busca = "Copo (300 ml)" if "Copo" in tamanho_suco else "Jarra (1 L)"
+            chave_preco = f"{sabor_suco} - {chave_tamanho_busca}"
+            preco_unit_suco = float(precos_sucos.get(chave_preco, 7.00))
+            preco_total_suco = preco_unit_suco * qtd_suco
+            
+            ponto_acucar = st.radio("Açúcar:", ["Com Açúcar", "Sem Açúcar", "Pouco Açúcar"], horizontal=True)
+            st.info(f"Valor Total ({qtd_suco}x): **R$ {preco_total_suco:.2f}**")
+
+            # Botão muda dinamicamente se estiver na animação de sucesso
+            if st.session_state.suco_sucesso_anim:
+                btn_label = "✅ Suco Adicionado com Sucesso!"
+            else:
+                btn_label = "➕ Adicionar Suco ao Carrinho"
+
+            btn_add_suco = st.form_submit_button(btn_label, type="primary")
+
+            if btn_add_suco:
+                if not nome_cliente or not telefone_cliente:
+                    st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
+                elif qtd_suco <= 0:
+                    st.error("Selecione uma quantidade maior que 0 para adicionar o suco.")
+                else:
+                    tipo_recipiente = "copo" if "copo" in tamanho_suco.lower() else "jarra"
+                    unidade_medida = "300 ml" if "copo" in tamanho_suco.lower() else "1 L"
+                    
+                    desc_suco = f"{qtd_suco} {tipo_recipiente}(s) de {unidade_medida} de suco de {sabor_suco.lower()} ({ponto_acucar.lower()})"
+                    
+                    st.session_state.carrinho_atual.append({
+                        "quantidade": qtd_suco,
+                        "item_principal": desc_suco,
+                        "detalhes": "",
+                        "preco": preco_total_suco
+                    })
+                    
+                    st.session_state.suco_sucesso_anim = True
+                    st.session_state.form_suco_key += 1
+                    st.toast("✅ Suco adicionado com sucesso!", icon="🥤")
+                    st.rerun()
+
+        # Reseta o estado do botão animado após o reload
+        if st.session_state.suco_sucesso_anim:
+            st.session_state.suco_sucesso_anim = False
+
+    # ---------------------------------------------------------
+    # MODO 2: INTELIGENTE POR VOZ / TEXTO LIVRE
+    # ---------------------------------------------------------
+    else:
+        st.markdown("### 🎙️ Fale ou Digite o seu Pedido Completo")
+        st.info("💡 **Exemplo:** 'Quero uma costela com feijão de caldo, outra costela sem feijão e sem salada e um copo de acerola.'")
+        
+        texto_fala = st.text_area(
+            "Digite ou clique no microfone do teclado do seu celular para ditar o pedido:",
+            placeholder="Exemplo: Quero uma costela com feijão de caldo outra costela sem feijao e sem salada e um copo de acerola"
+        )
+
+        if st.button("⚡ Processar e Adicionar Pedido ao Carrinho"):
+            if not nome_cliente or not telefone_cliente:
+                st.error("Por favor, preencha o seu Nome e Telefone no topo da página.")
+            elif not texto_fala.strip():
+                st.warning("Digite ou dite o seu pedido primeiro.")
+            else:
+                preco_base = float(menu_diario["preco_marmita"])
+                itens_detectados = processar_fala_inteligente(texto_fala, preco_base, precos_sucos)
+                
+                for item_det in itens_detectados:
+                    st.session_state.carrinho_atual.append(item_det)
+                    
+                st.toast("Pedido inteligente adicionado!", icon="⚡")
+                st.success(f"✨ {len(itens_detectados)} item(ns) identificados e adicionados com sucesso!")
+                st.rerun()
+
+    st.divider()
+
+    st.markdown("### 🛒 Seu Pedido Atual")
+    if not st.session_state.carrinho_atual:
+        st.info("O seu carrinho está vazio. Adicione uma refeição ou suco acima.")
+    else:
+        total_geral = 0.0
+        for i, item in enumerate(st.session_state.carrinho_atual):
+            col_c1, col_c2, col_c3 = st.columns([3, 1, 1])
+            with col_c1:
+                st.write(f"• **{item['item_principal']}**")
+                if item['detalhes']:
+                    st.caption(f"  {item['detalhes']}")
+            with col_c2:
+                st.write(f"R$ {item['preco']:.2f}")
+            with col_c3:
+                if st.button("Remover", key=f"rem_{i}"):
+                    st.session_state.carrinho_atual.pop(i)
+                    st.rerun()
+            total_geral += item["preco"]
+            
+        st.markdown(f"### 💰 **Total do Pedido: R$ {total_geral:.2f}**")
+        
+        st.markdown("---")
+        st.markdown("### 💳 Forma de Pagamento & Finalização")
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            forma_pagamento = st.selectbox("Forma de Pagamento:", ["Pix", "Dinheiro", "Cartão na Retirada"])
+        with col_p2:
+            info_formal_pagamento = st.selectbox("Deseja informação formal de pagamento / nota?", ["Não", "Sim (Desejo recibo/comprovante formal)"])
+        
+        troco_info = ""
+        if forma_pagamento == "Dinheiro":
+            precisa_troco = st.radio("Precisa de troco?", ["Não", "Sim"], horizontal=True)
+            if precisa_troco == "Sim":
+                troco_info = st.text_input("Troco para quanto? (ex: R$ 50,00)")
+
+        if st.button("🚀 Finalizar e Enviar Pedido via WhatsApp", type="primary"):
+            if not nome_cliente or not telefone_cliente:
+                st.error("Por favor, informe seu Nome e Telefone antes de enviar.")
+            else:
+                linhas_pedido = []
+                for it in st.session_state.carrinho_atual:
+                    linha = f"{it['item_principal']} - R$ {it['preco']:.2f}"
+                    if it["detalhes"]:
+                        linha += f"\n  Detalhes: {it['detalhes']}"
+                    linhas_pedido.append(linha)
+                
+                texto_itens = "\n\n".join(linhas_pedido)
+                
+                pagamento_texto = forma_pagamento
+                if forma_pagamento == "Dinheiro" and troco_info:
+                    pagamento_texto += f" (Troco para: {troco_info})"
+
+                salvar_pedido(
+                    date.today(), 
+                    nome_cliente, 
+                    telefone_cliente, 
+                    horario_retirada, 
+                    texto_itens.replace("\n", " | "), 
+                    total_geral, 
+                    pagamento_texto, 
+                    info_formal_pagamento
+                )
+                
+                whatsapp_restaurante = "5599981370792"
+                texto_mensagem = f"NOVO PEDIDO :\nCliente: {nome_cliente}\nHorário de Retirada: {horario_retirada}\n\n{texto_itens}\n\nForma de Pagamento: {pagamento_texto}\nInformação Formal de Pagamento: {info_formal_pagamento}\nTotal Geral: R$ {total_geral:.2f}"
+                mensagem_formatada = urllib.parse.quote(texto_mensagem)
+                link_whatsapp = f"https://wa.me/{whatsapp_restaurante}?text={mensagem_formatada}"
+                
+                st.session_state.carrinho_atual = []
+                st.success("Pedido registrado com sucesso!")
+                st.markdown(f"### 👉 [Clique aqui para abrir o WhatsApp e enviar o seu pedido]({link_whatsapp})", unsafe_allow_html=True)
+
+# ==========================================
+# BOTÃO DISCRETO PARA ENTRAR COMO ADMINISTRADOR
+# ==========================================
+st.markdown("<br><br><br>", unsafe_allow_html=True)
+st.markdown("---")
+with st.expander("🔐 Acesso Administrativo (Restrito)"):
+    senha_digitada = st.text_input("Digite a senha de Administrador:", type="password", key="senha_admin_discreto")
+    if st.button("Entrar no Painel do Administrador"):
+        if senha_digitada == "1234":
+            st.session_state.modo_admin = True
+            st.success("Acesso liberado!")
+            st.rerun()
+        else:
+            st.error("Senha incorreta!")
