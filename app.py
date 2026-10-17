@@ -6,7 +6,12 @@ import sqlite3
 import json
 
 # Configuração da página com layout amplo e visual mobile-first
-st.set_page_config(page_title="App Restaurante - Pedidos e Gestão", page_icon="🍽️", layout="wide")
+st.set_page_config(
+    page_title="App Restaurante - Pedidos e Gestão", 
+    page_icon="🍽️", 
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
 # ==========================================
 # CONEXÃO E BANCO DE DADOS PERSISTENTE (SQLITE)
@@ -22,7 +27,6 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Tabela de Configurações do Cardápio
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS configuracoes (
             chave TEXT PRIMARY KEY,
@@ -30,7 +34,6 @@ def init_db():
         )
     """)
     
-    # Tabela de Estoque
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS estoque (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,7 +46,6 @@ def init_db():
         )
     """)
     
-    # Tabela de Pedidos
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS pedidos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,34 +62,6 @@ def init_db():
         )
     """)
 
-    # Tabela de Compras
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS compras (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            produto TEXT,
-            qtd REAL,
-            unidade TEXT,
-            vl_unit REAL,
-            total REAL,
-            pessoal INTEGER,
-            empresa TEXT,
-            data TEXT,
-            obs TEXT
-        )
-    """)
-
-    # Tabela de Fornecedores
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fornecedores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT,
-            contato TEXT,
-            produtos TEXT,
-            obs TEXT
-        )
-    """)
-    
-    # Inserir dados padrões caso esteja vazio
     cursor.execute("SELECT COUNT(*) FROM configuracoes")
     if cursor.fetchone()[0] == 0:
         menu_padrao = {
@@ -201,7 +175,6 @@ def dar_baixa_estoque_pedido(pedido_texto):
     cursor = conn.cursor()
     estoque = pd.read_sql_query("SELECT * FROM estoque", conn).to_dict("records")
     
-    # Estima quantidade de marmitas vendidas no texto do pedido
     total_marmitas = 0
     linhas = pedido_texto.split("|")
     for linha in linhas:
@@ -228,11 +201,9 @@ def atualizar_status_pedido(id_ped, novo_estado):
     row = cursor.fetchone()
     
     if row:
-        estado_antigo = row["estado"]
         ja_baixou = row["estoque_baixado"]
         pedido_texto = row["pedido"]
         
-        # Baixa automática no estoque ao alterar para Pago / Concluído
         if novo_estado == "Pago / Concluído" and not ja_baixou:
             dar_baixa_estoque_pedido(pedido_texto)
             cursor.execute("UPDATE pedidos SET estado = ?, estoque_baixado = 1 WHERE id = ?", (novo_estado, id_ped))
@@ -243,17 +214,123 @@ def atualizar_status_pedido(id_ped, novo_estado):
     conn.close()
 
 # ==========================================
-# DESIGN E ESTILO CSS PREMIUM
+# DESIGN E ESTILO CSS ULTRA MODERNO
 # ==========================================
 st.markdown("""
     <style>
-    .main { background-color: #f4f6f8; font-family: 'Inter', sans-serif; }
-    h1, h2, h3 { color: #111827; font-weight: 700; }
-    .stMetric { background-color: #ffffff; padding: 16px; border-radius: 14px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); border-left: 5px solid #10b981; }
-    .stButton>button { border-radius: 10px; font-weight: 600; background-color: #10b981; color: white; border: none; padding: 0.5rem 1rem; width: 100%; }
-    .stButton>button:hover { background-color: #059669; }
-    div[data-testid="stExpander"] { background-color: #ffffff; border-radius: 12px; border: 1px solid #e5e7eb; margin-bottom: 12px; }
-    .alerta-estoque { background-color: #fee2e2; border-left: 4px solid #ef4444; padding: 10px; border-radius: 8px; color: #991b1b; font-weight: 600; }
+    /* Estilo Geral de Fundo e Tipografia */
+    .main {
+        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #1e293b;
+    }
+    
+    /* Header do Aplicativo */
+    .app-header {
+        background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+        padding: 24px;
+        border-radius: 20px;
+        color: white;
+        text-align: center;
+        box-shadow: 0 10px 25px -5px rgba(16, 185, 129, 0.4);
+        margin-bottom: 25px;
+    }
+    .app-header h1 {
+        color: #ffffff !important;
+        font-size: 2.2rem;
+        font-weight: 800;
+        margin: 0;
+        letter-spacing: -0.5px;
+    }
+    .app-header p {
+        color: #e6f4ea;
+        font-size: 1.05rem;
+        margin-top: 6px;
+        margin-bottom: 0;
+    }
+
+    /* Cards e Containers com Sombra Suave */
+    .custom-card {
+        background: #ffffff;
+        padding: 20px;
+        border-radius: 16px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+        border: 1px solid #f1f5f9;
+        margin-bottom: 20px;
+    }
+
+    /* Cartão de Item de Carrinho */
+    .cart-card {
+        background: #ffffff;
+        border-left: 5px solid #10b981;
+        padding: 16px;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        margin-bottom: 12px;
+    }
+
+    /* Métricas do Dashboard Admin */
+    .stMetric {
+        background: #ffffff !important;
+        padding: 18px !important;
+        border-radius: 16px !important;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.04) !important;
+        border: 1px solid #e2e8f0 !important;
+        border-left: 6px solid #10b981 !important;
+    }
+
+    /* Botões Principais */
+    .stButton>button {
+        border-radius: 12px !important;
+        font-weight: 700 !important;
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+        color: white !important;
+        border: none !important;
+        padding: 0.65rem 1.2rem !important;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25) !important;
+        transition: all 0.2s ease-in-out !important;
+        width: 100% !important;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 18px rgba(16, 185, 129, 0.35) !important;
+    }
+
+    /* Expansores Elegantes */
+    div[data-testid="stExpander"] {
+        background-color: #ffffff !important;
+        border-radius: 14px !important;
+        border: 1px solid #e2e8f0 !important;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.02) !important;
+        margin-bottom: 12px !important;
+    }
+
+    /* Alerta de Estoque */
+    .alerta-estoque {
+        background-color: #fef2f2;
+        border-left: 5px solid #ef4444;
+        padding: 14px;
+        border-radius: 12px;
+        color: #991b1b;
+        font-weight: 600;
+        margin-bottom: 15px;
+    }
+    
+    /* Abas de Navegação */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #ffffff;
+        border-radius: 10px 10px 0 0;
+        padding: 10px 18px;
+        font-weight: 600;
+        color: #64748b;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #10b981 !important;
+        border-bottom: 3px solid #10b981 !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -271,7 +348,13 @@ precos_sucos = carregar_config("precos_sucos")
 # PAINEL ADMINISTRATIVO
 # ==========================================
 if st.session_state.modo_admin:
-    st.markdown("### 🔒 Painel do Administrador")
+    st.markdown("""
+        <div class='app-header'>
+            <h1>🔒 Painel de Gestão & Administração</h1>
+            <p>Controle do cardápio, recepção de pedidos, estoque e fechamento financeiro.</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
     if st.button("⬅️ Voltar para a Visão do Cliente"):
         st.session_state.modo_admin = False
         st.rerun()
@@ -279,7 +362,7 @@ if st.session_state.modo_admin:
     st.divider()
 
     admin_tab1, admin_tab2, admin_tab3, admin_tab4 = st.tabs([
-        "⚙️ Cardápio e Preços", 
+        "⚙️ Cardápio & Preços", 
         "📋 Pedidos & Comandas", 
         "📦 Estoque & Conciliação",
         "📊 Fechamento de Caixa"
@@ -301,42 +384,283 @@ if st.session_state.modo_admin:
         st.markdown("#### 💰 Preço Padrão da Refeição")
         preco_marmita_novo = st.number_input("Preço Padrão (R$):", value=float(menu_diario["preco_marmita"]), step=1.00)
         
-        if st.button("💾 Guardar Alterações do Cardápio", type="primary"):
+        if st.button("💾 Salvar Alterações do Cardápio", type="primary"):
             menu_diario["carnes"] = [c.strip() for c in novas_carnes.split(",") if c.strip()]
             menu_diario["tipos_arroz"] = [r.strip() for r in novos_tipos_arroz.split(",") if r.strip()]
             menu_diario["acompanhamentos_padrao"] = [a.strip() for a in novos_acompanhamentos.split(",") if a.strip()]
             menu_diario["preco_marmita"] = preco_marmita_novo
             salvar_config("menu_diario", menu_diario)
-            st.success("Cardápio salvo permanentemente no banco de dados!")
+            st.success("✨ Cardápio atualizado com sucesso!")
             st.rerun()
             
     with admin_tab2:
         st.markdown("#### 📥 Pedidos Recebidos & Impressão de Comanda")
         lista_pedidos = carregar_pedidos()
         if not lista_pedidos:
-            st.info("Nenhum pedido recebido.")
+            st.info("Nenhum pedido recebido até o momento.")
         else:
             for ped in lista_pedidos:
-                with st.expander(f"Pedido #{ped['id']} - {ped['cliente']} | Status: {ped['estado']} (R$ {ped['total']:.2f})"):
-                    st.write(f"**Data:** {ped['data']} | **Horário Retirada:** {ped['horario_retirada']}")
-                    st.write(f"**Telefone:** {ped['telefone']}")
-                    st.write(f"**Itens do Pedido:** {ped['pedido']}")
-                    st.write(f"**Forma de Pagamento:** {ped['pagamento']}")
-                    st.write(f"**Info Formal / Nota Fiscal:** {ped['nota_info']}")
+                with st.expander(f"📦 Pedido #{ped['id']} - {ped['cliente']} | Status: {ped['estado']} (R$ {ped['total']:.2f})"):
+                    st.write(f"📅 **Data:** {ped['data']} | ⏰ **Horário Retirada:** {ped['horario_retirada']}")
+                    st.write(f"📱 **Telefone:** {ped['telefone']}")
+                    st.write(f"🍽️ **Itens:** {ped['pedido']}")
+                    st.write(f"💳 **Pagamento:** {ped['pagamento']}")
+                    st.write(f"📄 **Nota Fiscal/Info Formal:** {ped['nota_info']}")
                     
                     if ped['estoque_baixado']:
-                        st.caption("✅ Baixa automática de estoque realizada para este pedido.")
+                        st.caption("✅ Baixa automática de estoque concluída.")
 
                     col_p1, col_p2 = st.columns(2)
                     with col_p1:
-                        novo_estado = st.selectbox("Alterar Status:", ["Pendente", "Em Preparo", "Pronto p/ Retirada", "Pago / Concluído", "Cancelado"],
+                        novo_estado = st.selectbox("Atualizar Status do Pedido:", ["Pendente", "Em Preparo", "Pronto p/ Retirada", "Pago / Concluído", "Cancelado"],
                                                    index=["Pendente", "Em Preparo", "Pronto p/ Retirada", "Pago / Concluído", "Cancelado"].index(ped['estado']),
                                                    key=f"status_sel_{ped['id']}")
-                        if st.button("💾 Atualizar Status", key=f"btn_status_{ped['id']}"):
+                        if st.button("💾 Confirmar Status", key=f"btn_status_{ped['id']}"):
                             atualizar_status_pedido(ped['id'], novo_estado)
-                            st.success("Status atualizado!")
+                            st.success("Status atualizado com sucesso!")
                             st.rerun()
                             
                     with col_p2:
                         st.markdown("##### 🛈 Comanda para Cozinha")
-                        comanda_texto = f"=== COMANDA #{ped['id']} ===\nCliente: {ped['cliente']}\nRetirada: {ped['horario_retirada']}\n\n{
+                        comanda_texto = f"=== COMANDA #{ped['id']} ===\nCliente: {ped['cliente']}\nRetirada: {ped['horario_retirada']}\n\n{ped['pedido'].replace(' | ', '\n')}\n\nTotal: R$ {ped['total']:.2f}\n====================="
+                        st.code(comanda_texto, language="text")
+
+    with admin_tab3:
+        st.markdown("#### 📦 Controle de Estoque & Conciliação Inteligente")
+        
+        estoque_atual = carregar_estoque()
+        itens_criticos = [i for i in estoque_atual if i['qtd'] <= (5.0 if i['unidade'] == 'KG' else 10.0)]
+        if itens_criticos:
+            st.markdown("<div class='alerta-estoque'>⚠️ ATENÇÃO: Itens com estoque baixo detectados!</div>", unsafe_allow_html=True)
+            for ic in itens_criticos:
+                st.write(f"• **{ic['item']}**: Restam apenas **{ic['qtd']} {ic['unidade']}**")
+            st.divider()
+
+        with st.form("form_novo_item_estoque"):
+            st.markdown("##### ➕ Cadastrar Novo Item no Estoque")
+            col_e1, col_e2, col_e3 = st.columns(3)
+            with col_e1:
+                nome_item = st.text_input("Nome do Item (ex: Fanta Lata, Coxão Mole):")
+                data_item = st.date_input("Data de Entrada:", value=date.today())
+            with col_e2:
+                cat_item = st.selectbox("Categoria:", ["Bebidas", "Cozinha / Estocáveis", "Verduras", "Embalagens e Marmitas"])
+                un_item = st.selectbox("Unidade:", ["KG", "UN", "Litros", "Pacotes"])
+            with col_e3:
+                qtd_input = st.text_input("Quantidade (ex: 7 ou 7.00):", value="10.0")
+                consumo_input = st.text_input("Gasto p/ Marmita (ex: 0.30):", value="0.0")
+
+            if st.form_submit_button("💾 Salvar no Estoque", type="primary"):
+                qtd_val = parse_float(qtd_input)
+                consumo_val = parse_float(consumo_input)
+                if not nome_item:
+                    st.error("Informe o nome do item.")
+                else:
+                    salvar_item_estoque(nome_item, cat_item, qtd_val, un_item, consumo_val, data_item)
+                    st.success("Item registrado no estoque!")
+                    st.rerun()
+
+        st.divider()
+        st.markdown("##### 📋 Gerenciar Estoque por Categoria")
+        
+        categorias_disponiveis = ["Bebidas", "Cozinha / Estocáveis", "Verduras", "Embalagens e Marmitas"]
+        cat_selecionada = st.radio("Filtrar Categoria:", categorias_disponiveis, horizontal=True)
+
+        for item_est in estoque_atual:
+            if item_est["categoria"] == cat_selecionada:
+                col_i1, col_i2, col_i3, col_i4, col_i5 = st.columns([2, 2, 2, 2, 1])
+                with col_i1:
+                    st.write(f"• **{item_est['item']}**")
+                    st.caption(f"📅 Entrada: {item_est['data']}")
+                with col_i2:
+                    nova_cat = st.selectbox("Categoria", categorias_disponiveis, index=categorias_disponiveis.index(item_est["categoria"]), key=f"est_cat_{item_est['id']}")
+                    if nova_cat != item_est["categoria"]:
+                        atualizar_item_estoque(item_est['id'], "categoria", nova_cat)
+                        st.rerun()
+                with col_i3:
+                    nova_qtd = st.number_input(f"Qtd ({item_est['unidade']})", value=float(item_est['qtd']), step=1.0, key=f"est_qtd_{item_est['id']}")
+                    if nova_qtd != item_est["qtd"]:
+                        atualizar_item_estoque(item_est['id'], "qtd", nova_qtd)
+                with col_i4:
+                    novo_consumo = st.number_input("Gasto/Marmita", value=float(item_est['consumo_por_marmita']), step=0.01, key=f"est_cons_{item_est['id']}")
+                    if novo_consumo != item_est["consumo_por_marmita"]:
+                        atualizar_item_estoque(item_est['id'], "consumo_por_marmita", novo_consumo)
+                with col_i5:
+                    if st.button("🗑️", key=f"del_est_{item_est['id']}"):
+                        deletar_item_estoque(item_est['id'])
+                        st.rerun()
+                st.markdown("---")
+
+    with admin_tab4:
+        st.markdown("#### 📊 Fechamento de Caixa & Resumo Financeiro")
+        lista_pedidos = carregar_pedidos()
+        df_vendas = pd.DataFrame(lista_pedidos) if lista_pedidos else pd.DataFrame()
+        
+        total_pagos = df_vendas[df_vendas["estado"] == "Pago / Concluído"]["total"].sum() if not df_vendas.empty else 0.0
+        
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            st.metric(label="💰 Vendas Concluídas", value=f"R$ {total_pagos:.2f}")
+        with col_m2:
+            st.metric(label="📦 Total de Pedidos Faturados", value=len(df_vendas))
+
+# ==========================================
+# VISÃO DO CLIENTE (INTERFACE PRINCIPAL)
+# ==========================================
+else:
+    st.markdown("""
+        <div class='app-header'>
+            <h1>🍽️ Restaurante Digital</h1>
+            <p>Escolha seus pratos favoritos, monte seu pedido e envie direto para o nosso WhatsApp!</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    col_cli1, col_cli2 = st.columns(2)
+    with col_cli1:
+        nome_cliente = st.text_input("Seu Nome:")
+    with col_cli2:
+        telefone_cliente = st.text_input("Seu Telefone / WhatsApp com DDD:")
+
+    horario_retirada = st.text_input("Horário Desejado para Retirada (ex: 12:30):", value="12:00")
+
+    if "carrinho_atual" not in st.session_state:
+        st.session_state.carrinho_atual = []
+
+    st.markdown("---")
+    st.markdown("### 🥗 1️⃣ Monte a sua Refeição")
+    
+    k = st.session_state.form_refeicao_key
+
+    with st.container():
+        col_qtd, col_carne = st.columns([1, 3])
+        with col_qtd:
+            quantidade = st.number_input("Quantidade:", min_value=0, value=0, step=1, key=f"qtd_marmita_{k}")
+        with col_carne:
+            carne_escolhida = st.selectbox("Escolha a Opção de Carne:", menu_diario["carnes"], key=f"carne_sel_{k}")
+        
+        tipo_arroz_feijao = st.radio("Escolha a Base do Prato:", menu_diario["tipos_arroz"], horizontal=True, key=f"base_sel_{k}")
+
+        st.markdown("**Acompanhamentos:** (desmarque se **NÃO** desejar)")
+        acomps_removidos = []
+        
+        cols_acomp = st.columns(3)
+        for index, acrod in enumerate(menu_diario["acompanhamentos_padrao"]):
+            col_target = cols_acomp[index % 3]
+            incluir = col_target.checkbox(f"Incluir {acrod}", value=True, key=f"acomp_{acrod}_{k}")
+            if not incluir:
+                acomps_removidos.append(acrod)
+                
+        obs_marmita = st.text_input("Observação / Preferência (ex: 'Caprichar no caldo'):", key=f"obs_input_{k}")
+
+        if st.button("➕ Adicionar Refeição ao Carrinho", type="primary"):
+            if not nome_cliente or not telefone_cliente:
+                st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
+            elif quantidade <= 0:
+                st.error("Selecione uma quantidade maior que 0.")
+            else:
+                preco_unit = float(menu_diario["preco_marmita"])
+                preco_total_item = preco_unit * quantidade
+                
+                base_simplificada = tipo_arroz_feijao.lower()
+                if "misturado" in base_simplificada or "baião" in base_simplificada:
+                    base_simplificada = "com arroz misturado"
+                
+                desc_principal = f"{quantidade} {carne_escolhida.lower()} {base_simplificada}"
+                
+                detalhes = []
+                if len(acomps_removidos) > 0:
+                    detalhes.append(f"sem {', '.join(acomps_removidos).lower()}")
+                if obs_marmita:
+                    detalhes.append(obs_marmita)
+                    
+                texto_detalhes = " e ".join(detalhes).capitalize() if detalhes else ""
+                
+                st.session_state.carrinho_atual.append({
+                    "quantidade": quantidade,
+                    "item_principal": desc_principal,
+                    "detalhes": texto_detalhes,
+                    "preco": preco_total_item
+                })
+                
+                st.session_state.form_refeicao_key += 1
+                st.success("Refeição adicionada ao carrinho!")
+                st.rerun()
+
+    st.divider()
+
+    st.markdown("### 🛒 2️⃣ Seu Pedido Atual")
+    if not st.session_state.carrinho_atual:
+        st.info("O seu carrinho está vazio. Adicione uma refeição acima.")
+    else:
+        total_geral = 0.0
+        for i, item in enumerate(st.session_state.carrinho_atual):
+            col_c1, col_c2, col_c3 = st.columns([3, 1, 1])
+            with col_c1:
+                st.write(f"• **{item['item_principal']}**")
+                if item['detalhes']:
+                    st.caption(f"  {item['detalhes']}")
+            with col_c2:
+                st.write(f"R$ {item['preco']:.2f}")
+            with col_c3:
+                if st.button("Remover", key=f"rem_{i}"):
+                    st.session_state.carrinho_atual.pop(i)
+                    st.rerun()
+            total_geral += item["preco"]
+            
+        st.markdown(f"### 💰 **Total do Pedido: R$ {total_geral:.2f}**")
+        
+        st.markdown("---")
+        st.markdown("### 💳 3️⃣ Forma de Pagamento & Finalização")
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            forma_pagamento = st.selectbox("Forma de Pagamento:", ["Pix", "Dinheiro", "Cartão na Retirada"])
+        with col_p2:
+            info_formal_pagamento = st.selectbox("Deseja informação formal de pagamento / nota?", ["Não", "Sim (Desejo recibo/comprovante formal)"])
+        
+        troco_info = ""
+        if forma_pagamento == "Dinheiro":
+            precisa_troco = st.radio("Precisa de troco?", ["Não", "Sim"], horizontal=True)
+            if precisa_troco == "Sim":
+                troco_info = st.text_input("Troco para quanto? (ex: R$ 50,00)")
+
+        if st.button("🚀 Finalizar e Enviar Pedido via WhatsApp", type="primary"):
+            if not nome_cliente or not telefone_cliente:
+                st.error("Por favor, informe seu Nome e Telefone antes de enviar.")
+            else:
+                linhas_pedido = []
+                for it in st.session_state.carrinho_atual:
+                    linha = it["item_principal"]
+                    if it["detalhes"]:
+                        linha += f"\n{it['detalhes']}"
+                    linhas_pedido.append(linha)
+                
+                texto_itens = "\n\n".join(linhas_pedido)
+                
+                pagamento_texto = forma_pagamento
+                if forma_pagamento == "Dinheiro" and troco_info:
+                    pagamento_texto += f" (Troco para: {troco_info})"
+
+                salvar_pedido(date.today(), nome_cliente, telefone_cliente, horario_retirada, texto_itens.replace("\n", " | "), total_geral, pagamento_texto, info_formal_pagamento)
+                
+                whatsapp_restaurante = "5599981370792"
+                texto_mensagem = f"NOVO PEDIDO :\nCliente: {nome_cliente}\nHorário de Retirada: {horario_retirada}\n\n{texto_itens}\n\nForma de Pagamento: {pagamento_texto}\nInformação Formal de Pagamento: {info_formal_pagamento}\nTotal Geral: R$ {total_geral:.2f}"
+                mensagem_formatada = urllib.parse.quote(texto_mensagem)
+                link_whatsapp = f"https://wa.me/{whatsapp_restaurante}?text={mensagem_formatada}"
+                
+                st.session_state.carrinho_atual = []
+                st.success("Pedido gravado com sucesso!")
+                st.markdown(f"### 👉 [Clique aqui para abrir o WhatsApp e enviar o seu pedido]({link_whatsapp})", unsafe_allow_html=True)
+
+# ==========================================
+# BOTÃO DISCRETO PARA ENTRAR COMO ADMINISTRADOR
+# ==========================================
+st.markdown("<br><br><br>", unsafe_allow_html=True)
+st.markdown("---")
+with st.expander("🔐 Acesso Administrativo (Restrito)"):
+    senha_digitada = st.text_input("Digite a senha de Administrador:", type="password", key="senha_admin_discreto")
+    if st.button("Entrar no Painel do Administrador"):
+        if senha_digitada == "1234":
+            st.session_state.modo_admin = True
+            st.success("Acesso liberado!")
+            st.rerun()
+        else:
+            st.error("Senha incorreta!")
