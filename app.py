@@ -63,11 +63,10 @@ def init_db():
         )
     """)
 
-    # Atualização automática da tabela de pedidos caso a coluna não exista no banco antigo
     try:
         cursor.execute("ALTER TABLE pedidos ADD COLUMN estoque_baixado INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
-        pass # A coluna já existe
+        pass
 
     cursor.execute("SELECT COUNT(*) FROM configuracoes")
     if cursor.fetchone()[0] == 0:
@@ -359,6 +358,9 @@ if "modo_admin" not in st.session_state:
 if "form_refeicao_key" not in st.session_state:
     st.session_state.form_refeicao_key = 0
 
+if "processando_clique" not in st.session_state:
+    st.session_state.processando_clique = False
+
 menu_diario = carregar_config("menu_diario")
 precos_sucos = carregar_config("precos_sucos")
 
@@ -587,11 +589,14 @@ else:
             obs_marmita = st.text_input("Observação / Preferência (ex: 'Caprichar no caldo'):", key=f"obs_input_{k}")
 
             if st.button("➕ Adicionar Refeição ao Carrinho", type="primary"):
-                if not nome_cliente or not telefone_cliente:
+                if st.session_state.processando_clique:
+                    st.warning("Aguarde, processando...")
+                elif not nome_cliente or not telefone_cliente:
                     st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
                 elif quantidade <= 0:
                     st.error("Selecione uma quantidade maior que 0.")
                 else:
+                    st.session_state.processando_clique = True
                     preco_unit = float(menu_diario["preco_marmita"])
                     preco_total_item = preco_unit * quantidade
                     
@@ -617,7 +622,9 @@ else:
                     })
                     
                     st.session_state.form_refeicao_key += 1
-                    st.success("Refeição adicionada ao carrinho!")
+                    st.success("✅ Refeição adicionada com sucesso ao carrinho!")
+                    st.toast("Refeição adicionada!", icon="🍽️")
+                    st.session_state.processando_clique = False
                     st.rerun()
 
         st.divider()
@@ -639,9 +646,12 @@ else:
             st.info(f"Valor do Suco: **R$ {preco_suco:.2f}**")
 
             if st.button("➕ Adicionar Suco ao Carrinho"):
-                if not nome_cliente or not telefone_cliente:
+                if st.session_state.processando_clique:
+                    st.warning("Aguarde, processando...")
+                elif not nome_cliente or not telefone_cliente:
                     st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
                 else:
+                    st.session_state.processando_clique = True
                     artigo = "Um" if "copo" in tamanho_suco.lower() else "Uma"
                     desc_suco = f"{artigo} {tamanho_suco.lower()} de suco de {sabor_suco.lower()} ({ponto_acucar.lower()})"
                     st.session_state.carrinho_atual.append({
@@ -650,7 +660,9 @@ else:
                         "detalhes": "",
                         "preco": preco_suco
                     })
-                    st.success("Suco adicionado ao carrinho!")
+                    st.success("✅ Suco adicionado com sucesso ao carrinho!")
+                    st.toast("Suco adicionado!", icon="🥤")
+                    st.session_state.processando_clique = False
                     st.rerun()
 
     # ---------------------------------------------------------
@@ -666,18 +678,23 @@ else:
         )
 
         if st.button("⚡ Processar e Adicionar Pedido ao Carrinho"):
-            if not nome_cliente or not telefone_cliente:
+            if st.session_state.processando_clique:
+                st.warning("Aguarde, processando...")
+            elif not nome_cliente or not telefone_cliente:
                 st.error("Por favor, preencha o seu Nome e Telefone no topo da página.")
             elif not texto_fala.strip():
                 st.warning("Digite ou dite o seu pedido primeiro.")
             else:
+                st.session_state.processando_clique = True
                 preco_base = float(menu_diario["preco_marmita"])
                 itens_detectados = processar_fala_inteligente(texto_fala, preco_base, precos_sucos)
                 
                 for item_det in itens_detectados:
                     st.session_state.carrinho_atual.append(item_det)
                     
-                st.success(f"✨ {len(itens_detectados)} item(ns) identificados e adicionados ao carrinho com valores corretos!")
+                st.success(f"✨ {len(itens_detectados)} item(ns) identificados e adicionados com sucesso!")
+                st.toast("Pedido inteligente adicionado!", icon="⚡")
+                st.session_state.processando_clique = False
                 st.rerun()
 
     st.divider()
