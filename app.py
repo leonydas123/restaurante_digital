@@ -98,6 +98,19 @@ if "compras_registro" not in st.session_state:
 if "cupons_importados" not in st.session_state:
     st.session_state.cupons_importados = set()
 
+# Banco de dados de Estoque estruturado por categorias
+if "estoque_geral" not in st.session_state:
+    st.session_state.estoque_geral = [
+        {"item": "Refrigerante Lata", "categoria": "Bebidas", "qtd": 48.0, "unidade": "UN", "consumo_por_marmita": 0.0},
+        {"item": "Arroz", "categoria": "Cozinha / Estocáveis", "qtd": 25.0, "unidade": "KG", "consumo_por_marmita": 0.150},
+        {"item": "Feijão", "categoria": "Cozinha / Estocáveis", "qtd": 15.0, "unidade": "KG", "consumo_por_marmita": 0.100},
+        {"item": "Colchão Mole (Carne)", "categoria": "Cozinha / Estocáveis", "qtd": 8.0, "unidade": "KG", "consumo_por_marmita": 0.300},
+        {"item": "Verduras / Salada", "categoria": "Verduras", "qtd": 5.0, "unidade": "KG", "consumo_por_marmita": 0.080},
+        {"item": "Marmita Isopor / PBR", "categoria": "Embalagens e Marmitas", "qtd": 100.0, "unidade": "UN", "consumo_por_marmita": 1.0},
+        {"item": "Copo 300 ml", "categoria": "Embalagens e Marmitas", "qtd": 150.0, "unidade": "UN", "consumo_por_marmita": 0.0},
+        {"item": "Tampa 50 ml / Molheira", "categoria": "Embalagens e Marmitas", "qtd": 200.0, "unidade": "UN", "consumo_por_marmita": 0.0},
+    ]
+
 if "fornecedores_registro" not in st.session_state:
     st.session_state.fornecedores_registro = [
         {
@@ -128,9 +141,11 @@ if st.session_state.modo_admin:
 
     st.divider()
 
-    admin_tab1, admin_tab2, admin_tab3, admin_tab4, admin_tab5, admin_tab6 = st.tabs([
+    # Adicionada a aba de Controle de Estoque
+    admin_tab1, admin_tab2, admin_tab3, admin_tab4, admin_tab5, admin_tab6, admin_tab7 = st.tabs([
         "⚙️ Cardápio e Preços", 
         "📋 Pedidos em Tempo Real", 
+        "📦 Estoque & Baixa",
         "🛒 Compras e Cupons",
         "🚚 Fornecedores",
         "🔐 Finanças dos Sócios",
@@ -191,7 +206,66 @@ if st.session_state.modo_admin:
                         st.session_state.pedidos_clientes[index]["Estado"] = novo_estado
                         st.rerun()
 
+    # ----------------------------------------------------
+    # NOVA ABA: ESTOQUE & BAIXA POR MARMITA
+    # ----------------------------------------------------
     with admin_tab3:
+        st.markdown("#### 📦 Controle de Estoque e Baixa por Ficha Técnica")
+        st.write("Gerencie os estoques por categoria (Bebidas, Cozinha, Verduras e Embalagens) e configure o consumo padrão por marmita.")
+
+        with st.form("form_novo_item_estoque"):
+            st.markdown("##### ➕ Adicionar Novo Item ao Estoque")
+            col_e1, col_e2, col_e3, col_e4, col_e5 = st.columns(5)
+            with col_e1:
+                nome_item = st.text_input("Nome do Item (ex: Colchão Mole):")
+            with col_e2:
+                cat_item = st.selectbox("Categoria:", ["Bebidas", "Cozinha / Estocáveis", "Verduras", "Embalagens e Marmitas"])
+            with col_e3:
+                qtd_item = st.number_input("Qtd Inicial:", min_value=0.0, value=10.0, step=1.0)
+            with col_e4:
+                un_item = st.selectbox("Unidade:", ["KG", "UN", "Litros", "Pacotes"])
+            with col_e5:
+                consumo_marmita = st.number_input("Consumo p/ Marmita:", min_value=0.0, value=0.0, step=0.01, help="Ex: 0.300 para 300g de carne")
+
+            if st.form_submit_button("💾 Salvar no Estoque", type="primary"):
+                if not nome_item:
+                    st.error("Informe o nome do item.")
+                else:
+                    st.session_state.estoque_geral.append({
+                        "item": nome_item,
+                        "categoria": cat_item,
+                        "qtd": qtd_item,
+                        "unidade": un_item,
+                        "consumo_por_marmita": consumo_marmita
+                    })
+                    st.success("Item adicionado ao estoque com sucesso!")
+                    st.rerun()
+
+        st.divider()
+        st.markdown("##### 📋 Listagem do Estoque Atual por Categorias")
+        
+        categorias_disponiveis = ["Bebidas", "Cozinha / Estocáveis", "Verduras", "Embalagens e Marmitas"]
+        cat_selecionada = st.radio("Filtrar Categoria:", categorias_disponiveis, horizontal=True)
+
+        for idx, item_est in enumerate(st.session_state.estoque_geral):
+            if item_est["categoria"] == cat_selecionada:
+                col_i1, col_i2, col_i3, col_i4 = st.columns([3, 2, 2, 1])
+                with col_i1:
+                    st.write(f"• **{item_est['item']}**")
+                    st.caption(f"Consumo p/ marmita: {item_est['consumo_por_marmita']} {item_est['unidade']}")
+                with col_i2:
+                    nova_qtd = st.number_input(f"Qtd ({item_est['unidade']})", value=float(item_est['qtd']), step=1.0, key=f"est_qtd_{idx}")
+                    st.session_state.estoque_geral[idx]["qtd"] = nova_qtd
+                with col_i3:
+                    novo_consumo = st.number_input("Gasto/Marmita", value=float(item_est['consumo_por_marmita']), step=0.01, key=f"est_cons_{idx}")
+                    st.session_state.estoque_geral[idx]["consumo_por_marmita"] = novo_consumo
+                with col_i4:
+                    if st.button("🗑️", key=f"del_est_{idx}"):
+                        st.session_state.estoque_geral.pop(idx)
+                        st.rerun()
+                st.markdown("---")
+
+    with admin_tab4:
         st.markdown("#### 🧾 Gestão de Compras e Cupons")
         col_cup1, col_cup2, col_cup3 = st.columns(3)
         with col_cup1:
@@ -263,7 +337,7 @@ if st.session_state.modo_admin:
         with c_tot2:
             st.metric("Gastos Pessoais", f"R$ {total_pessoal:.2f}")
 
-    with admin_tab4:
+    with admin_tab5:
         st.markdown("#### 🚚 Gestão de Fornecedores")
         with st.form("form_novo_fornecedor"):
             nome_fornecedor = st.text_input("Nome do Fornecedor:")
@@ -278,7 +352,7 @@ if st.session_state.modo_admin:
             with st.expander(f"🏢 {forn['nome']}"):
                 st.write(f"**Contato:** {forn['contato']} | **Produtos:** {forn['produtos']}")
 
-    with admin_tab5:
+    with admin_tab6:
         st.markdown("#### 🔐 Área Restrita dos Proprietários (Patrão)")
         st.info("Apenas o dono da empresa tem acesso ao balanço final de dívidas e despesas particulares.")
         senha_acesso = st.text_input("Digite a Senha Mestra do Proprietário:", type="password")
@@ -294,7 +368,7 @@ if st.session_state.modo_admin:
             
             st.metric("Lucro Líquido Operacional", f"R$ {lucro_operacional:.2f}")
 
-    with admin_tab6:
+    with admin_tab7:
         st.markdown("#### 📊 Fechamento de Caixa")
         df_vendas = pd.DataFrame(st.session_state.pedidos_clientes) if st.session_state.pedidos_clientes else pd.DataFrame()
         total_pagos = df_vendas[df_vendas["Estado"] == "Pago / Concluído"]["Total"].sum() if not df_vendas.empty else 0.0
