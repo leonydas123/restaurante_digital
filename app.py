@@ -5,6 +5,7 @@ import urllib.parse
 import sqlite3
 import json
 import re
+import time
 
 # Configuração da página com layout amplo e visual mobile-first
 st.set_page_config(
@@ -342,6 +343,9 @@ if "form_refeicao_key" not in st.session_state:
 if "form_suco_key" not in st.session_state:
     st.session_state.form_suco_key = 0
 
+if "suco_sucesso_anim" not in st.session_state:
+    st.session_state.suco_sucesso_anim = False
+
 menu_diario = carregar_config("menu_diario")
 precos_sucos = carregar_config("precos_sucos")
 
@@ -607,7 +611,7 @@ else:
         st.divider()
         st.markdown("### 🥤 2️⃣ Sucos e Bebidas (Opcional)")
         
-        # FORMULÁRIO DE SUCO SEGURO QUE RESETE A QUANTIDADE
+        # FORMULÁRIO DE SUCO COM QUANTIDADE ZERADA INICIALMENTE
         ks = st.session_state.form_suco_key
         with st.form(key=f"form_suco_{ks}"):
             col_s1, col_s2, col_s3 = st.columns([2, 2, 1])
@@ -616,7 +620,7 @@ else:
             with col_s2:
                 tamanho_suco = st.selectbox("Tamanho:", ["Copo de 300 ml", "Jarra de 1 L"])
             with col_s3:
-                qtd_suco = st.number_input("Qtd:", min_value=1, value=1, step=1)
+                qtd_suco = st.number_input("Qtd:", min_value=0, value=0, step=1)
                 
             chave_tamanho_busca = "Copo (300 ml)" if "Copo" in tamanho_suco else "Jarra (1 L)"
             chave_preco = f"{sabor_suco} - {chave_tamanho_busca}"
@@ -626,11 +630,19 @@ else:
             ponto_acucar = st.radio("Açúcar:", ["Com Açúcar", "Sem Açúcar", "Pouco Açúcar"], horizontal=True)
             st.info(f"Valor Total ({qtd_suco}x): **R$ {preco_total_suco:.2f}**")
 
-            btn_add_suco = st.form_submit_button("➕ Adicionar Suco ao Carrinho", type="primary")
+            # Botão muda dinamicamente se estiver na animação de sucesso
+            if st.session_state.suco_sucesso_anim:
+                btn_label = "✅ Suco Adicionado com Sucesso!"
+            else:
+                btn_label = "➕ Adicionar Suco ao Carrinho"
+
+            btn_add_suco = st.form_submit_button(btn_label, type="primary")
 
             if btn_add_suco:
                 if not nome_cliente or not telefone_cliente:
                     st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
+                elif qtd_suco <= 0:
+                    st.error("Selecione uma quantidade maior que 0 para adicionar o suco.")
                 else:
                     tipo_recipiente = "copo" if "copo" in tamanho_suco.lower() else "jarra"
                     unidade_medida = "300 ml" if "copo" in tamanho_suco.lower() else "1 L"
@@ -644,10 +656,14 @@ else:
                         "preco": preco_total_suco
                     })
                     
+                    st.session_state.suco_sucesso_anim = True
                     st.session_state.form_suco_key += 1
                     st.toast("✅ Suco adicionado com sucesso!", icon="🥤")
-                    st.success("✅ Suco adicionado com sucesso ao carrinho!")
                     st.rerun()
+
+        # Reseta o estado do botão animado após o reload
+        if st.session_state.suco_sucesso_anim:
+            st.session_state.suco_sucesso_anim = False
 
     # ---------------------------------------------------------
     # MODO 2: INTELIGENTE POR VOZ / TEXTO LIVRE
