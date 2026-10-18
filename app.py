@@ -341,34 +341,32 @@ def processar_fala_inteligente(texto_fala, preco_marmita_base, precos_sucos_dict
     return itens_extraidos
 
 # ==========================================
-# DESIGN E ESTILO CSS SEGURO E ELEGANTE
+# DESIGN E ESTILO CSS COMPATÍVEL COM MODO ESCURO
 # ==========================================
 st.markdown("""
     <style>
     .main {
-        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        color: #1e293b;
     }
     
     .app-header {
         background: linear-gradient(135deg, #059669 0%, #10b981 100%);
-        padding: 24px;
-        border-radius: 20px;
+        padding: 20px;
+        border-radius: 16px;
         color: white;
         text-align: center;
         box-shadow: 0 10px 25px -5px rgba(16, 185, 129, 0.4);
-        margin-bottom: 25px;
+        margin-bottom: 20px;
     }
     .app-header h1 {
         color: #ffffff !important;
-        font-size: 2.2rem;
+        font-size: 1.8rem;
         font-weight: 800;
         margin: 0;
     }
     .app-header p {
         color: #e6f4ea;
-        font-size: 1.05rem;
+        font-size: 0.95rem;
         margin-top: 6px;
     }
 
@@ -384,12 +382,16 @@ st.markdown("""
         width: 100% !important;
     }
 
+    /* CORREÇÃO PARA O MODO ESCURO NOS EXPANDERS NO MOBILE */
     div[data-testid="stExpander"] {
-        background-color: #ffffff !important;
-        border-radius: 14px !important;
-        border: 1px solid #e2e8f0 !important;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.02) !important;
+        border-radius: 12px !important;
+        border: 1px solid #10b981 !important;
         margin-bottom: 12px !important;
+    }
+    div[data-testid="stExpander"] summary span {
+        color: #10b981 !important;
+        font-weight: 700 !important;
+        font-size: 1rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -657,7 +659,7 @@ if st.session_state.modo_admin:
                         st.rerun()
                 st.markdown("---")
 
-    # NOVA ABA: RELATÓRIOS & INTELIGÊNCIA
+    # ABA: RELATÓRIOS & INTELIGÊNCIA
     with admin_tab7:
         st.markdown("#### 📈 Relatórios de Desempenho & Inteligência do Negócio")
         st.info("Visão analítica gerencial para tomada de decisões rápidas.")
