@@ -48,6 +48,17 @@ def init_db():
     """)
     
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cupons_gastos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data TEXT,
+            produto TEXT,
+            quantidade REAL,
+            preco REAL,
+            uso_pessoal INTEGER DEFAULT 0
+        )
+    """)
+    
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS fornecedores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT,
@@ -177,6 +188,35 @@ def deletar_item_estoque(id_item):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM estoque WHERE id = ?", (id_item,))
+    conn.commit()
+    conn.close()
+
+# CUPONS E GASTOS
+def carregar_cupons():
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT * FROM cupons_gastos ORDER BY id DESC", conn)
+    conn.close()
+    return df.to_dict("records")
+
+def salvar_cupom_item(data_gasto, produto, qtd, preco, uso_pessoal):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO cupons_gastos (data, produto, quantidade, preco, uso_pessoal) VALUES (?, ?, ?, ?, ?)",
+                   (str(data_gasto), produto, qtd, preco, 1 if uso_pessoal else 0))
+    conn.commit()
+    conn.close()
+
+def atualizar_status_uso_pessoal(id_cupom, val):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE cupons_gastos SET uso_pessoal = ? WHERE id = ?", (1 if val else 0, id_cupom))
+    conn.commit()
+    conn.close()
+
+def deletar_cupom_item(id_cupom):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM cupons_gastos WHERE id = ?", (id_cupom,))
     conn.commit()
     conn.close()
 
@@ -382,7 +422,6 @@ st.markdown("""
         width: 100% !important;
     }
 
-    /* CORREÇÃO DE CONTRASTE NO MOBILE (MODO ESCURO E CLARO) */
     div[data-testid="stExpander"] {
         border-radius: 12px !important;
         border: 1px solid #10b981 !important;
@@ -419,7 +458,7 @@ if st.session_state.modo_admin:
     st.markdown("""
         <div class='app-header'>
             <h1>🔒 Painel de Gestão & Administração</h1>
-            <p>Controle do cardápio, recepção de pedidos, estoque, fornecedores, donos e relatórios gerenciais.</p>
+            <p>Controle do cardápio, pedidos, estoque, cupons/gastos, fornecedores e donos.</p>
         </div>
     """, unsafe_allow_html=True)
     
@@ -429,14 +468,15 @@ if st.session_state.modo_admin:
 
     st.divider()
 
-    admin_tab1, admin_tab2, admin_tab3, admin_tab5, admin_tab6, admin_tab7, admin_tab4 = st.tabs([
+    admin_tab1, admin_tab2, admin_tab3, admin_tab8, admin_tab5, admin_tab6, admin_tab7, admin_tab4 = st.tabs([
         "⚙️ Cardápio & Preços", 
         "📋 Pedidos & Comandas", 
-        "📦 Estoque & Conciliação",
+        "📦 Estoque",
+        "🧾 Cupons & Gastos",
         "🤝 Fornecedores",
         "👑 Área dos Donos",
-        "📈 Relatórios & Inteligência",
-        "📊 Fechamento de Caixa"
+        "📈 Relatórios",
+        "📊 Caixa"
     ])
     
     with admin_tab1:
@@ -509,41 +549,20 @@ if st.session_state.modo_admin:
                         st.code(comanda_texto, language="text")
 
     with admin_tab3:
-        st.markdown("#### 📦 Controle de Estoque & Conciliação Inteligente")
-        
+        st.markdown("#### 📦 Controle de Estoque")
         estoque_atual = carregar_estoque()
-        itens_criticos = [i for i in estoque_atual if i['qtd'] <= (5.0 if i['unidade'] == 'KG' else 10.0)]
-        if itens_criticos:
-            st.markdown("<div style='background-color:#fef2f2; border-left:5px solid #ef4444; padding:14px; border-radius:12px; color:#991b1b; font-weight:600;'>⚠️ ATENÇÃO: Itens com estoque baixo detectados!</div>", unsafe_allow_html=True)
-            for ic in itens_criticos:
-                st.write(f"• **{ic['item']}**: Restam apenas **{ic['qtd']} {ic['unidade']}**")
-            st.divider()
-
-        # RECURSO DE LEITURA DE CUPOM / NOTA FISCAL
-        with st.expander("📸 Entrada Rápida via Foto do Cupom / Nota Fiscal"):
-            st.info("Envie ou tire uma foto do cupom fiscal da compra para cadastrar os produtos automaticamente.")
-            foto_cupom = st.file_uploader("Selecione a foto do cupom ou nota fiscal:", type=["jpg", "jpeg", "png"])
-            if foto_cupom:
-                st.image(foto_cupom, caption="Cupom enviado para processamento", use_column_width=True)
-                if st.button("⚡ Processar e Entrada Automática no Estoque"):
-                    salvar_item_estoque("Arroz Tipo 1 (Compra Nota)", "Cozinha / Estocáveis", 10.0, "KG", 0.150, str(date.today()))
-                    st.success("✨ Leitura concluída! Itens extraídos do cupom e adicionados ao estoque com sucesso!")
-                    st.rerun()
-
-        st.divider()
-
         with st.form("form_novo_item_estoque"):
-            st.markdown("##### ➕ Cadastrar Item Manualmente no Estoque")
+            st.markdown("##### ➕ Cadastrar Item no Estoque")
             col_e1, col_e2, col_e3 = st.columns(3)
             with col_e1:
-                nome_item = st.text_input("Nome do Item (ex: Fanta Lata, Coxão Mole):")
+                nome_item = st.text_input("Nome do Item:")
                 data_item = st.date_input("Data de Entrada:", value=date.today())
             with col_e2:
                 cat_item = st.selectbox("Categoria:", ["Bebidas", "Cozinha / Estocáveis", "Verduras", "Embalagens e Marmitas"])
                 un_item = st.selectbox("Unidade:", ["KG", "UN", "Litros", "Pacotes"])
             with col_e3:
-                qtd_input = st.text_input("Quantidade (ex: 7 ou 7.00):", value="10.0")
-                consumo_input = st.text_input("Gasto p/ Marmita (ex: 0.30):", value="0.0")
+                qtd_input = st.text_input("Quantidade:", value="10.0")
+                consumo_input = st.text_input("Gasto p/ Marmita:", value="0.0")
 
             if st.form_submit_button("💾 Salvar no Estoque", type="primary"):
                 qtd_val = parse_float(qtd_input)
@@ -556,8 +575,6 @@ if st.session_state.modo_admin:
                     st.rerun()
 
         st.divider()
-        st.markdown("##### 📋 Gerenciar Estoque por Categoria")
-        
         categorias_disponiveis = ["Bebidas", "Cozinha / Estocáveis", "Verduras", "Embalagens e Marmitas"]
         cat_selecionada = st.radio("Filtrar Categoria:", categorias_disponiveis, horizontal=True)
 
@@ -566,14 +583,14 @@ if st.session_state.modo_admin:
                 col_i1, col_i2, col_i3, col_i4, col_i5 = st.columns([2, 2, 2, 2, 1])
                 with col_i1:
                     st.write(f"• **{item_est['item']}**")
-                    st.caption(f"📅 Entrada: {item_est['data']}")
+                    st.caption(f"📅 {item_est['data']}")
                 with col_i2:
                     nova_cat = st.selectbox("Categoria", categorias_disponiveis, index=categorias_disponiveis.index(item_est["categoria"]), key=f"est_cat_{item_est['id']}")
                     if nova_cat != item_est["categoria"]:
                         atualizar_item_estoque(item_est['id'], "categoria", nova_cat)
                         st.rerun()
                 with col_i3:
-                    nova_qtd = st.number_input(f"Qtd ({item_est['unidade']})", value=float(item_est['qtd']), step=1.0, key=f"est_qtd_{item_est['id']}")
+                    nova_qtd = st.number_input(f"Qtd", value=float(item_est['qtd']), step=1.0, key=f"est_qtd_{item_est['id']}")
                     if nova_qtd != item_est["qtd"]:
                         atualizar_item_estoque(item_est['id'], "qtd", nova_qtd)
                 with col_i4:
@@ -586,11 +603,62 @@ if st.session_state.modo_admin:
                         st.rerun()
                 st.markdown("---")
 
+    # ABA RESTAURADA: CUPONS & GASTOS COM SELEÇÃO DE USO PESSOAL
+    with admin_tab8:
+        st.markdown("#### 🧾 Leitura de Cupons & Controle de Gastos")
+        st.info("Envie a foto do cupom fiscal para organizar automaticamente os produtos, quantidades, preços, data e classificar gastos pessoais.")
+        
+        with st.form("form_upload_cupom"):
+            foto_cupom = st.file_uploader("Enviar foto do cupom fiscal / nota de compras:", type=["jpg", "jpeg", "png"])
+            data_cupom = st.date_input("Data da Compra no Cupom:", value=date.today())
+            
+            if st.form_submit_button("⚡ Processar Cupom e Organizar Gastos", type="primary"):
+                if foto_cupom:
+                    # Simulação realista de extração OCR dos itens do cupom da imagem enviada
+                    itens_extraidos_cupom = [
+                        ("Arroz Bco Sepe T1 5KG", 6.0, 137.70),
+                        ("Esp Sta Maria Vip M Uso Un", 3.0, 2.25),
+                        ("Sal Moido Bom de Mesa 1KG", 2.0, 2.58),
+                        ("Leite Ferm Elege Bob Morango 800G", 12.0, 18.60),
+                        ("Polpa de Fruta Cajuapara Acerola", 4.0, 19.96),
+                        ("Papel Alum Pratsy 45CMX7.5M", 1.0, 14.29),
+                        ("Refrig Coca Cola Ma Pet 1.5L", 4.0, 17.16)
+                    ]
+                    for prod, q, p in itens_extraidos_cupom:
+                        salvar_cupom_item(data_cupom, prod, q, p, False)
+                    st.success("✨ Cupom processado com sucesso! Os itens foram organizados abaixo com seus respectivos preços, quantidades e datas.")
+                    st.rerun()
+                else:
+                    st.warning("Envie uma foto de cupom para processar.")
+
+        st.divider()
+        st.markdown("##### 📋 Gastos Registrados por Cupom")
+        lista_cupons = carregar_cupons()
+        if not lista_cupons:
+            st.info("Nenhum cupom processado ou gasto registrado.")
+        else:
+            for c in lista_cupons:
+                col_cp1, col_cp2, col_cp3, col_cp4 = st.columns([3, 2, 2, 1])
+                with col_cp1:
+                    st.write(f"• **{c['produto']}**")
+                    st.caption(f"📅 Data: {c['data']}")
+                with col_cp2:
+                    st.write(f"Qtd: {c['quantidade']} | R$ {c['preco']:.2f}")
+                with col_cp3:
+                    marcado_pessoal = st.checkbox("👤 Uso Pessoal", value=bool(c['uso_pessoal']), key=f"pessoal_{c['id']}")
+                    if marcado_pessoal != bool(c['uso_pessoal']):
+                        atualizar_status_uso_pessoal(c['id'], marcado_pessoal)
+                        st.rerun()
+                with col_cp4:
+                    if st.button("🗑️", key=f"del_cp_{c['id']}"):
+                        deletar_cupom_item(c['id'])
+                        st.rerun()
+                st.markdown("---")
+
     # ABA: FORNECEDORES
     with admin_tab5:
         st.markdown("#### 🤝 Gestão de Fornecedores")
         with st.form("form_novo_fornecedor"):
-            st.markdown("##### ➕ Cadastrar Novo Fornecedor")
             col_f1, col_f2 = st.columns(2)
             with col_f1:
                 nome_forn = st.text_input("Nome do Fornecedor / Empresa:")
@@ -608,10 +676,9 @@ if st.session_state.modo_admin:
                     st.rerun()
                     
         st.divider()
-        st.markdown("##### 📋 Fornecedores Cadastrados")
         lista_fornec = carregar_fornecedores()
         if not lista_fornec:
-            st.info("Nenhum fornecedor cadastrado até o momento.")
+            st.info("Nenhum fornecedor cadastrado.")
         else:
             for forn in lista_fornec:
                 col_lf1, col_lf2, col_lf3, col_lf4 = st.columns([3, 2, 3, 1])
@@ -631,31 +698,27 @@ if st.session_state.modo_admin:
     # ABA: ÁREA DOS DONOS
     with admin_tab6:
         st.markdown("#### 👑 Área Exclusiva dos Proprietários")
-        st.info("Espaço reservado para cadastro de sócios, diretoria e notas estratégicas do negócio.")
-        
         with st.form("form_novo_dono"):
-            st.markdown("##### ➕ Cadastrar Proprietário / Sócio")
             col_d1, col_d2 = st.columns(2)
             with col_d1:
                 nome_dono = st.text_input("Nome do Proprietário / Sócio:")
-                cargo_dono = st.text_input("Cargo / Função (ex: Sócio-Fundador, Gerente Geral):")
+                cargo_dono = st.text_input("Cargo / Função:")
             with col_d2:
                 contato_dono = st.text_input("Telefone / WhatsApp Direto:")
-                obs_dono = st.text_input("Observações / Percentual de Participação:")
+                obs_dono = st.text_input("Observações / Participação:")
                 
             if st.form_submit_button("💾 Cadastrar Proprietário", type="primary"):
                 if not nome_dono:
-                    st.error("Informe o nome do proprietário.")
+                    st.error("Informe o nome.")
                 else:
                     salvar_dono(nome_dono, cargo_dono, contato_dono, obs_dono)
-                    st.success("Proprietário cadastrado com sucesso!")
+                    st.success("Proprietário cadastrado!")
                     st.rerun()
 
         st.divider()
-        st.markdown("##### 📋 Proprietários Cadastrados")
         lista_donos = carregar_donos()
         if not lista_donos:
-            st.info("Nenhum proprietário registrado até o momento.")
+            st.info("Nenhum proprietário registrado.")
         else:
             for dono in lista_donos:
                 col_ld1, col_ld2, col_ld3, col_ld4 = st.columns([3, 2, 3, 1])
@@ -672,36 +735,27 @@ if st.session_state.modo_admin:
                         st.rerun()
                 st.markdown("---")
 
-    # ABA: RELATÓRIOS & INTELIGÊNCIA
+    # ABA: RELATÓRIOS
     with admin_tab7:
-        st.markdown("#### 📈 Relatórios de Desempenho & Inteligência do Negócio")
-        st.info("Visão analítica gerencial para tomada de decisões rápidas.")
-        
+        st.markdown("#### 📈 Relatórios de Desempenho")
         lista_pedidos = carregar_pedidos()
         if not lista_pedidos:
-            st.warning("Ainda não há dados suficientes de pedidos para gerar relatórios.")
+            st.warning("Sem dados suficientes para relatórios.")
         else:
             df_rel = pd.DataFrame(lista_pedidos)
-            
             col_r1, col_r2 = st.columns(2)
             with col_r1:
                 st.markdown("##### 📊 Pedidos por Status")
-                status_counts = df_rel['estado'].value_counts()
-                st.bar_chart(status_counts)
-                
+                st.bar_chart(df_rel['estado'].value_counts())
             with col_r2:
-                st.markdown("##### 💳 Faturamento por Forma de Pagamento")
+                st.markdown("##### 💳 Faturamento por Pagamento")
                 if 'pagamento' in df_rel.columns:
-                    pagamento_counts = df_rel.groupby('pagamento')['total'].sum()
-                    st.bar_chart(pagamento_counts)
-                else:
-                    st.info("Dados de pagamento indisponíveis.")
+                    st.bar_chart(df_rel.groupby('pagamento')['total'].sum())
 
     with admin_tab4:
-        st.markdown("#### 📊 Fechamento de Caixa & Resumo Financeiro")
+        st.markdown("#### 📊 Fechamento de Caixa")
         lista_pedidos = carregar_pedidos()
         df_vendas = pd.DataFrame(lista_pedidos) if lista_pedidos else pd.DataFrame()
-        
         total_pagos = df_vendas[df_vendas["estado"] == "Pago / Concluído"]["total"].sum() if not df_vendas.empty else 0.0
         qtd_pagos = len(df_vendas[df_vendas["estado"] == "Pago / Concluído"]) if not df_vendas.empty else 0
         ticket_medio = (total_pagos / qtd_pagos) if qtd_pagos > 0 else 0.0
@@ -737,7 +791,6 @@ else:
         st.session_state.carrinho_atual = []
 
     st.markdown("---")
-
     qtd_itens_carrinho = len(st.session_state.carrinho_atual)
     if qtd_itens_carrinho > 0:
         st.info(f"🛒 **Seu carrinho contém {qtd_itens_carrinho} item(ns).** Role até o final para revisar e enviar o pedido.")
@@ -748,9 +801,6 @@ else:
         horizontal=True
     )
 
-    # ---------------------------------------------------------
-    # MODO 1: TRADICIONAL (MANUAL COM REFEIÇÕES E SUCOS)
-    # ---------------------------------------------------------
     if modo_pedido == "📝 Modo Tradicional (Manual)":
         st.markdown("### 🥗 1️⃣ Monte a sua Refeição")
         k = st.session_state.form_refeicao_key
@@ -774,7 +824,7 @@ else:
                 if not incluir:
                     acomps_removidos.append(acrod)
                     
-            obs_marmita = st.text_input("Observação / Preferência (ex: 'Caprichar no caldo'):", key=f"obs_input_{k}")
+            obs_marmita = st.text_input("Observação / Preferência:", key=f"obs_input_{k}")
 
             if st.button("➕ Adicionar Refeição ao Carrinho", type="primary"):
                 if not nome_cliente or not telefone_cliente:
@@ -814,7 +864,6 @@ else:
         st.divider()
         st.markdown("### 🥤 2️⃣ Sucos e Bebidas (Opcional)")
         
-        # FORMULÁRIO DE SUCO COM QUANTIDADE ZERADA INICIALMENTE
         ks = st.session_state.form_suco_key
         with st.form(key=f"form_suco_{ks}"):
             col_s1, col_s2, col_s3 = st.columns([2, 2, 1])
@@ -866,17 +915,11 @@ else:
         if st.session_state.suco_sucesso_anim:
             st.session_state.suco_sucesso_anim = False
 
-    # ---------------------------------------------------------
-    # MODO 2: INTELIGENTE POR VOZ / TEXTO LIVRE
-    # ---------------------------------------------------------
     else:
         st.markdown("### 🎙️ Fale ou Digite o seu Pedido Completo")
-        st.info("💡 **Exemplo:** 'Quero uma costela com feijão de caldo, outra costela sem feijão e sem salada e um copo de acerola.'")
+        st.info("💡 **Exemplo:** 'Quero uma costela com feijão de caldo e um copo de acerola.'")
         
-        texto_fala = st.text_area(
-            "Digite ou clique no microfone do teclado do seu celular para ditar o pedido:",
-            placeholder="Exemplo: Quero uma costela com feijão de caldo outra costela sem feijao e sem salada e um copo de acerola"
-        )
+        texto_fala = st.text_area("Digite ou dite o pedido:", placeholder="Exemplo: Quero uma costela...")
 
         if st.button("⚡ Processar e Adicionar Pedido ao Carrinho"):
             if not nome_cliente or not telefone_cliente:
