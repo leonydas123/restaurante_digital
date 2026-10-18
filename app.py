@@ -226,6 +226,34 @@ def deletar_item_estoque(id_item):
     conn.commit()
     conn.close()
 
+# BAIXA IMEDIATA NO ESTOQUE AO ADICIONAR AO CARRINHO
+def baixar_estoque_item(nome_item_procurado, qtd_a_baixar):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, qtd FROM estoque WHERE LOWER(item) LIKE ?", (f"%{nome_item_procurado.lower()}%",))
+    row = cursor.fetchone()
+    if row:
+        item_id = row["id"]
+        qtd_atual = float(row["qtd"])
+        nova_qtd = max(0.0, qtd_atual - float(qtd_a_baixar))
+        cursor.execute("UPDATE estoque SET qtd = ? WHERE id = ?", (nova_qtd, item_id))
+        conn.commit()
+    conn.close()
+
+# ESTORNO NO ESTOQUE AO REMOVER DO CARRINHO
+def estornar_estoque_item(nome_item_procurado, qtd_a_estornar):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, qtd FROM estoque WHERE LOWER(item) LIKE ?", (f"%{nome_item_procurado.lower()}%",))
+    row = cursor.fetchone()
+    if row:
+        item_id = row["id"]
+        qtd_atual = float(row["qtd"])
+        nova_qtd = qtd_atual + float(qtd_a_estornar)
+        cursor.execute("UPDATE estoque SET qtd = ? WHERE id = ?", (nova_qtd, item_id))
+        conn.commit()
+    conn.close()
+
 # RENDIMENTO DE CARNES
 def carregar_carnes_rendimento():
     conn = get_db_connection()
@@ -348,55 +376,15 @@ def salvar_pedido(data_ped, cliente, telefone, horario, pedido_str, total, pagam
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO pedidos (data, cliente, telefone, horario_retirada, pedido, total, pagamento, nota_info, estado, estoque_baixado)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendente', 0)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendente', 1)
     """, (str(data_ped), str(cliente), str(telefone), str(horario), str(pedido_str), float(total), str(pagamento), str(nota_info)))
-    conn.commit()
-    conn.close()
-
-def dar_baixa_estoque_completo(pedido_texto):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    estoque = pd.read_sql_query("SELECT * FROM estoque", conn).to_dict("records")
-    linhas = pedido_texto.split("|")
-    
-    for linha in linhas:
-        linha_lower = linha.lower()
-        partes = linha.strip().split()
-        qtd_pedido = 1
-        if partes and partes[0].isdigit():
-            qtd_pedido = int(partes[0])
-
-        for item in estoque:
-            if item["item"].lower() in linha_lower:
-                nova_qtd = max(0.0, item["qtd"] - qtd_pedido)
-                cursor.execute("UPDATE estoque SET qtd = ? WHERE id = ?", (nova_qtd, item["id"]))
-        
-        carnes_db = pd.read_sql_query("SELECT * FROM rendimento_carnes", conn).to_dict("records")
-        for carne in carnes_db:
-            if carne["nome_carne"].lower() in linha_lower:
-                nova_qtd_carne = max(0.0, float(carne["qtd_atual_disponivel"]) - qtd_pedido)
-                cursor.execute("UPDATE rendimento_carnes SET qtd_atual_disponivel = ? WHERE id = ?", (nova_qtd_carne, carne["id"]))
-
     conn.commit()
     conn.close()
 
 def atualizar_status_pedido(id_ped, novo_estado):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT estado, estoque_baixado, pedido FROM pedidos WHERE id = ?", (id_ped,))
-    row = cursor.fetchone()
-    
-    if row:
-        ja_baixou = row["estoque_baixado"]
-        pedido_texto = row["pedido"]
-        
-        if novo_estado == "Pago / Concluído" and not ja_baixou:
-            dar_baixa_estoque_completo(pedido_texto)
-            cursor.execute("UPDATE pedidos SET estado = ?, estoque_baixado = 1 WHERE id = ?", (novo_estado, id_ped))
-        else:
-            cursor.execute("UPDATE pedidos SET estado = ? WHERE id = ?", (novo_estado, id_ped))
-            
+    cursor.execute("UPDATE pedidos SET estado = ? WHERE id = ?", (novo_estado, id_ped))
     conn.commit()
     conn.close()
 
@@ -604,7 +592,7 @@ if st.session_state.modo_admin:
             st.rerun()
             
     with admin_tab2:
-        st.markdown("#### 📥 Pedidos Recebidos & Baixa de Estoque")
+        st.markdown("#### 📥 Pedidos Recebidos")
         filtro_status = st.selectbox("Filtrar Pedidos por Status:", ["Todos", "Pendente", "Em Preparo", "Pronto p/ Retirada", "Pago / Concluído", "Cancelado"])
         lista_pedidos = carregar_pedidos()
         
@@ -620,9 +608,6 @@ if st.session_state.modo_admin:
                     st.write(f"📱 **Telefone:** {ped['telefone']}")
                     st.write(f"🍽️ **Itens:** {ped['pedido']}")
                     st.write(f"💳 **Pagamento:** {ped['pagamento']}")
-                    
-                    if ped['estoque_baixado']:
-                        st.caption("✅ Baixa automática realizada no estoque.")
 
                     col_p1, col_p2 = st.columns(2)
                     with col_p1:
@@ -800,7 +785,6 @@ if st.session_state.modo_admin:
         for f in carregar_fornecedores():
             st.write(f"• {f['nome']} - {f['telefone']}")
 
-    # ABA DONOS COMPLETA E RESTAURADA
     with admin_tab6:
         st.markdown("#### 👑 Gestão de Sócios e Donos")
         st.caption("Cadastre os sócios, cargos e percentuais de participação no estabelecimento.")
@@ -850,7 +834,6 @@ if st.session_state.modo_admin:
         if lista_p:
             st.bar_chart(pd.DataFrame(lista_p)['estado'].value_counts())
 
-    # ABA FECHAMENTO DE CAIXA COMPLETA E RESTAURADA
     with admin_tab4:
         st.markdown("#### 📊 Fechamento e Controle de Caixa")
         
@@ -1010,7 +993,6 @@ else:
                     
                     col_qb1, col_qb2 = st.columns(2)
                     with col_qb1:
-                        # CORRIGIDO: Quantidade começa em 0 para evitar duplicações acidentais
                         qtd_bebida = st.number_input("Quantidade:", min_value=0, value=0, step=1, key=f"qtd_beb_{kb}")
                     with col_qb2:
                         obs_bebida = st.text_input("Preferência (ex: Gelada):", key=f"obs_beb_{kb}")
@@ -1030,14 +1012,17 @@ else:
                             if qtd_bebida > est_max:
                                 st.error(f"❌ Estoque insuficiente! Restam apenas {int(est_max)} unidade(s) de '{item_nome}'.")
                             else:
+                                # BAIXA IMEDIATA NO ESTOQUE AO ADICIONAR
+                                baixar_estoque_item(item_nome, qtd_bebida)
+                                
                                 st.session_state.carrinho_atual.append({
                                     "quantidade": qtd_bebida,
                                     "item_principal": f"{qtd_bebida}x {item_nome}" + (f" ({obs_bebida})" if obs_bebida else ""),
                                     "detalhes": "",
-                                    "preco": preco_b * qtd_bebida
+                                    "preco": preco_b * qtd_bebida,
+                                    "item_estoque_nome": item_nome # Guardado para estorno se removido
                                 })
                                 st.session_state.form_suco_key += 1
-                                # CORRIGIDO: Mensagem com selo de verificado
                                 st.success("✅ Refrigerante adicionado ao carrinho com sucesso!")
                                 st.rerun()
 
@@ -1055,7 +1040,6 @@ else:
                 with col_s2:
                     tamanho_suco = st.selectbox("Tamanho:", ["Copo de 300 ml", "Jarra de 1 L"])
                 with col_s3:
-                    # CORRIGIDO: Quantidade começa em 0 para evitar cliques acidentais
                     qtd_suco = st.number_input("Qtd:", min_value=0, value=0, step=1)
                     
                 chave_tamanho_busca = "Copo (300 ml)" if "Copo" in tamanho_suco else "Jarra (1 L)"
@@ -1113,6 +1097,9 @@ else:
                 st.write(f"R$ {item['preco']:.2f}")
             with col_c3:
                 if st.button("Remover", key=f"rem_{i}"):
+                    # ESTORNO AUTOMÁTICO SE FOR UM ITEM DE ESTOQUE
+                    if "item_estoque_nome" in item:
+                        estornar_estoque_item(item["item_estoque_nome"], item["quantidade"])
                     st.session_state.carrinho_atual.pop(i)
                     st.rerun()
             total_geral += item["preco"]
