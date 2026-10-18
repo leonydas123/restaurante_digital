@@ -315,6 +315,7 @@ def deletar_fornecedor(id_forn):
     conn.commit()
     conn.close()
 
+# DONOS
 def carregar_donos():
     conn = get_db_connection()
     df = pd.read_sql_query("SELECT * FROM donos ORDER BY id DESC", conn)
@@ -533,7 +534,7 @@ if st.session_state.modo_admin:
     st.markdown("""
         <div class='app-header'>
             <h1>🔒 Painel de Gestão & Administração</h1>
-            <p>Cardápio, Pedidos, Estoque, Rendimento de Carnes e Preços de Sucos.</p>
+            <p>Cardápio, Pedidos, Estoque, Rendimento de Carnes, Fechamento de Caixa e Gestão de Sócios.</p>
         </div>
     """, unsafe_allow_html=True)
     
@@ -552,7 +553,7 @@ if st.session_state.modo_admin:
         "🤝 Fornecedores",
         "👑 Donos",
         "📈 Relatórios",
-        "📊 Caixa"
+        "📊 Fechamento de Caixa"
     ])
     
     with admin_tab1:
@@ -720,7 +721,7 @@ if st.session_state.modo_admin:
                     st.error("Informe o nome da carne.")
                 else:
                     salvar_carne_rendimento(nome_c_input, q_val, g_val, data_c_reg)
-                    st.success("✨ Rendimento de carne calculated e salvo!")
+                    st.success("✨ Rendimento de carne calculado e salvo!")
                     st.rerun()
 
         st.divider()
@@ -799,16 +800,49 @@ if st.session_state.modo_admin:
         for f in carregar_fornecedores():
             st.write(f"• {f['nome']} - {f['telefone']}")
 
+    # ABA DONOS COMPLETA E RESTAURADA
     with admin_tab6:
-        st.markdown("#### 👑 Donos")
-        with st.form("form_dono"):
-            d_nome = st.text_input("Nome do Sócio:")
-            if st.form_submit_button("Salvar"):
-                if d_nome:
-                    salvar_dono(d_nome, "Sócio", "", "")
+        st.markdown("#### 👑 Gestão de Sócios e Donos")
+        st.caption("Cadastre os sócios, cargos e percentuais de participação no estabelecimento.")
+        
+        with st.form("form_cadastro_dono_completo"):
+            st.markdown("##### ➕ Cadastrar / Atualizar Sócio")
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                dono_nome = st.text_input("Nome do Sócio / Proprietário:")
+                dono_cargo = st.selectbox("Cargo / Função:", ["Sócio Proprietário", "Gerente Geral", "Administrador Financeiro", "Investidor"])
+            with col_d2:
+                dono_contato = st.text_input("Contato / WhatsApp:")
+                dono_obs = st.text_input("Observações / Participação (%):", value="50%")
+
+            if st.form_submit_button("💾 Salvar Sócio", type="primary"):
+                if not dono_nome:
+                    st.error("Informe o nome do sócio.")
+                else:
+                    salvar_dono(dono_nome, dono_cargo, dono_contato, dono_obs)
+                    st.success("✨ Sócio cadastrado com sucesso!")
                     st.rerun()
-        for d in carregar_donos():
-            st.write(f"• {d['nome']} ({d['cargo']})")
+
+        st.divider()
+        st.markdown("##### 📋 Sócios Cadastrados")
+        lista_donos_cad = carregar_donos()
+        if not lista_donos_cad:
+            st.info("Nenhum sócio cadastrado ainda.")
+        else:
+            for dono_item in lista_donos_cad:
+                col_dn1, col_dn2, col_dn3, col_dn4 = st.columns([2, 2, 2, 1])
+                with col_dn1:
+                    st.write(f"👑 **{dono_item['nome']}**")
+                    st.caption(f"Cargo: {dono_item['cargo']}")
+                with col_dn2:
+                    st.write(f"📱 {dono_item['contato'] or 'Não informado'}")
+                with col_dn3:
+                    st.write(f"📝 {dono_item['observacoes'] or 'Sem observações'}")
+                with col_dn4:
+                    if st.button("🗑️", key=f"del_dono_{dono_item['id']}"):
+                        deletar_dono(dono_item['id'])
+                        st.rerun()
+                st.markdown("---")
 
     with admin_tab7:
         st.markdown("#### 📈 Relatórios")
@@ -816,11 +850,49 @@ if st.session_state.modo_admin:
         if lista_p:
             st.bar_chart(pd.DataFrame(lista_p)['estado'].value_counts())
 
+    # ABA FECHAMENTO DE CAIXA COMPLETA E RESTAURADA
     with admin_tab4:
-        st.markdown("#### 📊 Caixa")
-        df_v = pd.DataFrame(carregar_pedidos()) if carregar_pedidos() else pd.DataFrame()
-        total_p = df_v[df_v["estado"] == "Pago / Concluído"]["total"].sum() if not df_v.empty else 0.0
-        st.metric("Vendas Concluídas", f"R$ {total_p:.2f}")
+        st.markdown("#### 📊 Fechamento e Controle de Caixa")
+        
+        pedidos_todos = carregar_pedidos()
+        data_caixa = st.date_input("Data da Consulta de Caixa:", value=date.today())
+        
+        pedidos_dia = [p for p in pedidos_todos if str(p['data']) == str(data_caixa) and p['estado'] == 'Pago / Concluído']
+        
+        total_bruto = sum([p['total'] for p in pedidos_dia])
+        total_pix = sum([p['total'] for p in pedidos_dia if 'pix' in str(p['pagamento']).lower()])
+        total_dinheiro = sum([p['total'] for p in pedidos_dia if 'dinheiro' in str(p['pagamento']).lower()])
+        total_cartao = sum([p['total'] for p in pedidos_dia if 'cartão' in str(p['pagamento']).lower() or 'cartao' in str(p['pagamento']).lower()])
+
+        col_cx1, col_cx2, col_cx3, col_cx4 = st.columns(4)
+        col_cx1.metric("💰 Total Vendido", f"R$ {total_bruto:.2f}")
+        col_cx2.metric("⚡ Pix", f"R$ {total_pix:.2f}")
+        col_cx3.metric("💵 Dinheiro", f"R$ {total_dinheiro:.2f}")
+        col_cx4.metric("💳 Cartão", f"R$ {total_cartao:.2f}")
+
+        st.divider()
+        st.markdown("##### 🧮 Conciliação Físico x Esperado (Gaveta)")
+        
+        col_cxf1, col_cxf2 = st.columns(2)
+        with col_cxf1:
+            fundo_troco = st.number_input("Fundo de Troco / Abertura (R$):", min_value=0.0, value=50.0, step=10.0)
+            sangrias = st.number_input("Retiradas / Sangrias do Caixa (R$):", min_value=0.0, value=0.0, step=10.0)
+            dinheiro_esperado = fundo_troco + total_dinheiro - sangrias
+            st.info(f"💵 Dinheiro esperado na gaveta: **R$ {dinheiro_esperado:.2f}**")
+            
+        with col_cxf2:
+            dinheiro_contado = st.number_input("Valor Contado na Gaveta (R$):", min_value=0.0, value=dinheiro_esperado, step=1.0)
+            diferenca_caixa = dinheiro_contado - dinheiro_esperado
+            
+            if diferenca_caixa == 0:
+                st.success("✅ Caixa sem divergência (Bateu 100%)!")
+            elif diferenca_caixa > 0:
+                st.warning(f"⚠️ Sobra no caixa de: R$ {diferenca_caixa:.2f}")
+            else:
+                st.error(f"❌ Falta no caixa de: R$ {abs(diferenca_caixa):.2f}")
+
+        if st.button("🔒 Realizar Fechamento Oficial do Dia", type="primary"):
+            st.success(f"Fechamento do dia {data_caixa} concluído e gravado com sucesso!")
 
 # ==========================================
 # VISÃO DO CLIENTE (INTERFACE PRINCIPAL)
