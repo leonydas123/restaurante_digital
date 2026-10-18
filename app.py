@@ -720,7 +720,7 @@ if st.session_state.modo_admin:
                     st.error("Informe o nome da carne.")
                 else:
                     salvar_carne_rendimento(nome_c_input, q_val, g_val, data_c_reg)
-                    st.success("✨ Rendimento de carne calculado e salvo!")
+                    st.success("✨ Rendimento de carne calculated e salvo!")
                     st.rerun()
 
         st.divider()
@@ -1058,10 +1058,17 @@ else:
                 st.success("Pedido registrado com sucesso!")
                 st.markdown(f"### 👉 [Clique aqui para abrir o WhatsApp]({link_wa})", unsafe_allow_html=True)
 
-# Botão de Administrador
+# ==========================================
+# BOTÃO DISCRETO PARA ENTRAR COMO ADMINISTRADOR
+# ==========================================
 st.markdown("<br><br><br>", unsafe_allow_html=True)
 st.markdown("---")
 with st.expander("🔐 Acesso Administrativo"):
-    if st.text_input("Senha:", type="password", key="adm_pass") == "1234":
-        st.session_state.modo_admin = True
-        st.rerun()
+    senha_digitada = st.text_input("Senha de Administrador:", type="password", key="adm_pass_input")
+    if st.button("🔑 Entrar no Painel"):
+        if senha_digitada == "1234":
+            st.session_state.modo_admin = True
+            st.success("Acesso liberado!")
+            st.rerun()
+        else:
+            st.error("Senha incorreta!")
