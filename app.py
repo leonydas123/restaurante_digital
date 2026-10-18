@@ -50,6 +50,18 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS rendimento_carnes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome_carne TEXT,
+            quilos_preparados REAL,
+            gramas_por_porcao REAL,
+            rendimento_total_marmitas INTEGER,
+            qtd_atual_disponivel REAL,
+            data TEXT
+        )
+    """)
+
     try:
         cursor.execute("ALTER TABLE estoque ADD COLUMN subcategoria TEXT DEFAULT 'Refrigerante'")
         cursor.execute("ALTER TABLE estoque ADD COLUMN preco_unitario REAL DEFAULT 5.00")
@@ -136,7 +148,7 @@ def init_db():
     cursor.execute("SELECT COUNT(*) FROM estoque")
     if cursor.fetchone()[0] == 0:
         itens_estoque_padrao = [
-            ("Coca Cola Lata 300ml", "Bebidas", "Refrigerante", 24.0, "UN", 6.00, 0.0, str(date.today())),
+            ("Coca Cola Lata 300ml", "Bebidas", "Refrigerante", 2.0, "UN", 6.00, 0.0, str(date.today())),
             ("Fanta Lata 300ml", "Bebidas", "Refrigerante", 20.0, "UN", 6.00, 0.0, str(date.today())),
             ("Suco Natural de Acerola", "Bebidas", "Suco Natural", 15.0, "UN", 7.00, 0.0, str(date.today())),
             ("Água Mineral 500ml", "Bebidas", "Outros", 30.0, "UN", 4.00, 0.0, str(date.today())),
@@ -146,6 +158,11 @@ def init_db():
             ("Marmita / Embalagem PBR", "Embalagens e Marmitas", "Refrigerante", 100.0, "UN", 0.0, 1.0, str(date.today()))
         ]
         cursor.executemany("INSERT INTO estoque (item, categoria, subcategoria, qtd, unidade, preco_unitario, consumo_por_marmita, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", itens_estoque_padrao)
+
+    cursor.execute("SELECT COUNT(*) FROM rendimento_carnes")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO rendimento_carnes (nome_carne, quilos_preparados, gramas_por_porcao, rendimento_total_marmitas, qtd_atual_disponivel, data) VALUES (?, ?, ?, ?, ?, ?)",
+                       ("Assado de Panela", 7.0, 150.0, 46, 46.0, str(date.today())))
 
     conn.commit()
     conn.close()
@@ -204,6 +221,37 @@ def deletar_item_estoque(id_item):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM estoque WHERE id = ?", (id_item,))
+    conn.commit()
+    conn.close()
+
+# RENDIMENTO DE CARNES
+def carregar_carnes_rendimento():
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT * FROM rendimento_carnes ORDER BY id DESC", conn)
+    conn.close()
+    return df.to_dict("records")
+
+def salvar_carne_rendimento(nome_carne, quilos, gramas_porc, data_reg):
+    quilos_g = float(quilos) * 1000.0
+    rendimento = int(quilos_g / float(gramas_porc)) if float(gramas_porc) > 0 else 0
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO rendimento_carnes (nome_carne, quilos_preparados, gramas_por_porcao, rendimento_total_marmitas, qtd_atual_disponivel, data) VALUES (?, ?, ?, ?, ?, ?)",
+                   (nome_carne, float(quilos), float(gramas_porc), rendimento, float(rendimento), str(data_reg)))
+    conn.commit()
+    conn.close()
+
+def atualizar_carne_rendimento(id_c, campo, valor):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(f"UPDATE rendimento_carnes SET {campo} = ? WHERE id = ?", (valor, id_c))
+    conn.commit()
+    conn.close()
+
+def deletar_carne_rendimento(id_c):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM rendimento_carnes WHERE id = ?", (id_c,))
     conn.commit()
     conn.close()
 
@@ -309,27 +357,34 @@ def salvar_pedido(data_ped, cliente, telefone, horario, pedido_str, total, pagam
     conn.commit()
     conn.close()
 
-def dar_baixa_estoque_pedido(pedido_texto):
+def dar_baixa_estoque_completo(pedido_texto):
     conn = get_db_connection()
     cursor = conn.cursor()
-    estoque = pd.read_sql_query("SELECT * FROM estoque", conn).to_dict("records")
     
-    total_marmitas = 0
+    # 1. Baixar estoque geral e bebidas
+    estoque = pd.read_sql_query("SELECT * FROM estoque", conn).to_dict("records")
     linhas = pedido_texto.split("|")
+    
     for linha in linhas:
+        linha_lower = linha.lower()
         partes = linha.strip().split()
+        qtd_pedido = 1
         if partes and partes[0].isdigit():
-            total_marmitas += int(partes[0])
-            
-    if total_marmitas == 0:
-        total_marmitas = 1
+            qtd_pedido = int(partes[0])
 
-    for item in estoque:
-        if item["consumo_por_marmita"] > 0:
-            desconto_total = item["consumo_por_marmita"] * total_marmitas
-            nova_qtd = max(0.0, item["qtd"] - desconto_total)
-            cursor.execute("UPDATE estoque SET qtd = ? WHERE id = ?", (nova_qtd, item["id"]))
-            
+        # Verificar se algum item do estoque bate com a linha do pedido
+        for item in estoque:
+            if item["item"].lower() in linha_lower:
+                nova_qtd = max(0.0, item["qtd"] - qtd_pedido)
+                cursor.execute("UPDATE estoque SET qtd = ? WHERE id = ?", (nova_qtd, item["id"]))
+        
+        # Baixar carne / rendimento de marmitas se mencionado
+        carnes_db = pd.read_sql_query("SELECT * FROM rendimento_carnes", conn).to_dict("records")
+        for carne in carnes_db:
+            if carne["nome_carne"].lower() in linha_lower:
+                nova_qtd_carne = max(0.0, float(carne["qtd_atual_disponivel"]) - qtd_pedido)
+                cursor.execute("UPDATE rendimento_carnes SET qtd_atual_disponivel = ? WHERE id = ?", (nova_qtd_carne, carne["id"]))
+
     conn.commit()
     conn.close()
 
@@ -344,7 +399,7 @@ def atualizar_status_pedido(id_ped, novo_estado):
         pedido_texto = row["pedido"]
         
         if novo_estado == "Pago / Concluído" and not ja_baixou:
-            dar_baixa_estoque_pedido(pedido_texto)
+            dar_baixa_estoque_completo(pedido_texto)
             cursor.execute("UPDATE pedidos SET estado = ?, estoque_baixado = 1 WHERE id = ?", (novo_estado, id_ped))
         else:
             cursor.execute("UPDATE pedidos SET estado = ? WHERE id = ?", (novo_estado, id_ped))
@@ -395,7 +450,7 @@ def processar_fala_inteligente(texto_fala, preco_marmita_base, precos_sucos_dict
         qtd_marmitas = 1
 
     partes = re.split(r'e|uma|outra|\,', texto)
-    partes_marmitas = [p.strip() for p in partes if ("costela" in p or "carne" in p or "feijão" in p or "marmita" in p or "salada" in p)]
+    partes_marmitas = [p.strip() for p in partes if ("costela" in p | "carne" in p or "feijão" in p or "marmita" in p or "salada" in p or "assado" in p)]
     
     if not partes_marmitas:
         partes_marmitas = [texto_fala]
@@ -489,7 +544,7 @@ if st.session_state.modo_admin:
     st.markdown("""
         <div class='app-header'>
             <h1>🔒 Painel de Gestão & Administração</h1>
-            <p>Controle do cardápio, pedidos, estoque sincronizado, cupons, fornecedores e donos.</p>
+            <p>Cardápio, Pedidos, Estoque, Rendimento de Carnes e Cupons.</p>
         </div>
     """, unsafe_allow_html=True)
     
@@ -499,13 +554,14 @@ if st.session_state.modo_admin:
 
     st.divider()
 
-    admin_tab1, admin_tab2, admin_tab3, admin_tab8, admin_tab5, admin_tab6, admin_tab7, admin_tab4 = st.tabs([
+    admin_tab1, admin_tab2, admin_tab3, admin_tab_carnes, admin_tab8, admin_tab5, admin_tab6, admin_tab7, admin_tab4 = st.tabs([
         "⚙️ Cardápio & Preços", 
         "📋 Pedidos & Comandas", 
         "📦 Estoque",
+        "🥩 Rendimento de Carnes",
         "🧾 Cupons & Gastos",
         "🤝 Fornecedores",
-        "👑 Área dos Donos",
+        "👑 Donos",
         "📈 Relatórios",
         "📊 Caixa"
     ])
@@ -539,11 +595,11 @@ if st.session_state.modo_admin:
             menu_diario["preco_marmita"] = preco_marmita_novo
             salvar_config("menu_diario", menu_diario)
             salvar_config("precos_sucos", novos_precos_sucos)
-            st.success("✨ Cardápio e preços de sucos atualizados com sucesso!")
+            st.success("✨ Cardápio e preços atualizados!")
             st.rerun()
             
     with admin_tab2:
-        st.markdown("#### 📥 Pedidos Recebidos & Impressão de Comanda")
+        st.markdown("#### 📥 Pedidos Recebidos & Baixa de Estoque")
         filtro_status = st.selectbox("Filtrar Pedidos por Status:", ["Todos", "Pendente", "Em Preparo", "Pronto p/ Retirada", "Pago / Concluído", "Cancelado"])
         lista_pedidos = carregar_pedidos()
         
@@ -551,18 +607,17 @@ if st.session_state.modo_admin:
             lista_pedidos = [p for p in lista_pedidos if p['estado'] == filtro_status]
             
         if not lista_pedidos:
-            st.info("Nenhum pedido encontrado com o filtro selecionado.")
+            st.info("Nenhum pedido encontrado.")
         else:
             for ped in lista_pedidos:
                 with st.expander(f"📦 Pedido #{ped['id']} - {ped['cliente']} | Status: {ped['estado']} (R$ {ped['total']:.2f})"):
-                    st.write(f"📅 **Data:** {ped['data']} | ⏰ **Horário Retirada:** {ped['horario_retirada']}")
+                    st.write(f"📅 **Data:** {ped['data']} | ⏰ **Retirada:** {ped['horario_retirada']}")
                     st.write(f"📱 **Telefone:** {ped['telefone']}")
                     st.write(f"🍽️ **Itens:** {ped['pedido']}")
                     st.write(f"💳 **Pagamento:** {ped['pagamento']}")
-                    st.write(f"📄 **Nota Fiscal/Info Formal:** {ped['nota_info']}")
                     
                     if ped['estoque_baixado']:
-                        st.caption("✅ Baixa automática de estoque concluída.")
+                        st.caption("✅ Baixa automática realizada no estoque.")
 
                     col_p1, col_p2 = st.columns(2)
                     with col_p1:
@@ -571,7 +626,7 @@ if st.session_state.modo_admin:
                                                    key=f"status_sel_{ped['id']}")
                         if st.button("💾 Confirmar Status", key=f"btn_status_{ped['id']}"):
                             atualizar_status_pedido(ped['id'], novo_estado)
-                            st.success("Status atualizado com sucesso!")
+                            st.success("Status atualizado e estoque baixado (se concluído)!")
                             st.rerun()
                             
                     with col_p2:
@@ -580,24 +635,24 @@ if st.session_state.modo_admin:
                         st.code(comanda_texto, language="text")
 
     with admin_tab3:
-        st.markdown("#### 📦 Controle de Estoque Sincronizado")
+        st.markdown("#### 📦 Controle de Estoque de Bebidas e Insumos")
         estoque_atual = carregar_estoque()
         with st.form("form_novo_item_estoque"):
-            st.markdown("##### ➕ Cadastrar Novo Item no Estoque (Ex: Bebidas para o Cliente)")
+            st.markdown("##### ➕ Cadastrar Novo Item no Estoque")
             col_e1, col_e2, col_e3 = st.columns(3)
             with col_e1:
                 nome_item = st.text_input("Nome do Item (ex: Coca Cola Lata 300ml):")
                 data_item = st.date_input("Data de Entrada:", value=date.today())
             with col_e2:
                 cat_item = st.selectbox("Categoria:", ["Bebidas", "Cozinha / Estocáveis", "Verduras", "Embalagens e Marmitas"])
-                subcat_item = st.selectbox("Tipo da Bebida (se categoria for Bebidas):", ["Refrigerante", "Suco Natural", "Outros"])
+                subcat_item = st.selectbox("Tipo de Bebida:", ["Refrigerante", "Suco Natural", "Outros"])
                 un_item = st.selectbox("Unidade:", ["UN", "KG", "Litros", "Pacotes"])
             with col_e3:
-                qtd_input = st.text_input("Quantidade em Estoque:", value="10.0")
+                qtd_input = st.text_input("Quantidade Inicial:", value="10.0")
                 preco_unit_input = st.text_input("Preço de Venda (R$):", value="6.00")
-                consumo_input = st.text_input("Gasto p/ Marmita (se ingrediente):", value="0.0")
+                consumo_input = st.text_input("Gasto p/ Marmita:", value="0.0")
 
-            if st.form_submit_button("💾 Salvar no Estoque & Sincronizar", type="primary"):
+            if st.form_submit_button("💾 Salvar no Estoque", type="primary"):
                 qtd_val = parse_float(qtd_input)
                 preco_val = parse_float(preco_unit_input)
                 consumo_val = parse_float(consumo_input)
@@ -605,7 +660,7 @@ if st.session_state.modo_admin:
                     st.error("Informe o nome do item.")
                 else:
                     salvar_item_estoque(nome_item, cat_item, subcat_item, qtd_val, un_item, preco_val, consumo_val, data_item)
-                    st.success("✨ Item salvo no estoque e sincronizado com a aba do cliente com sucesso!")
+                    st.success("Item salvo no estoque!")
                     st.rerun()
 
         st.divider()
@@ -617,9 +672,10 @@ if st.session_state.modo_admin:
                 col_i1, col_i2, col_i3, col_i4, col_i5, col_i6 = st.columns([2, 1.5, 1.5, 1.5, 1.5, 1])
                 with col_i1:
                     st.write(f"• **{item_est['item']}**")
-                    st.caption(f"Tipo: {item_est.get('subcat', item_est.get('subcategoria', 'Refrigerante'))}")
+                    if item_est['qtd'] <= 0:
+                        st.caption("🔴 ESTOQUE ZERADO")
                 with col_i2:
-                    nova_subcat = st.selectbox("Subtipo", ["Refrigerante", "Suco Natural", "Outros"], index=["Refrigerante", "Suco Natural", "Outros"].index(item_est.get('subcategoria', 'Refrigerante')), key=f"sub_{item_est['id']}")
+                    nova_subcat = st.selectbox("Tipo", ["Refrigerante", "Suco Natural", "Outros"], index=["Refrigerante", "Suco Natural", "Outros"].index(item_est.get('subcategoria', 'Refrigerante')), key=f"sub_{item_est['id']}")
                     if nova_subcat != item_est.get('subcategoria', 'Refrigerante'):
                         atualizar_item_estoque(item_est['id'], "subcategoria", nova_subcat)
                         st.rerun()
@@ -641,185 +697,130 @@ if st.session_state.modo_admin:
                         st.rerun()
                 st.markdown("---")
 
-    # ABA: CUPONS & GASTOS
+    # NOVA ABA: RENDIMENTO DE CARNES POR GRAMAS E KG
+    with admin_tab_carnes:
+        st.markdown("#### 🥩 Controle de Rendimento de Carnes (Quilos ➔ Gramas ➔ Marmitas)")
+        st.info("Registre quantos quilos de carne foram preparados e quantas gramas vão em cada marmita. O sistema calculará o total de marmitas que podem ser vendidas!")
+
+        with st.form("form_novo_rendimento_carne"):
+            col_rc1, col_rc2 = st.columns(2)
+            with col_rc1:
+                nome_c_input = st.text_input("Nome da Carne (ex: Assado de Panela):", value="Assado de Panela")
+                quilos_prep = st.text_input("Quilos Preparados na Panela (ex: 7.0):", value="7.0")
+            with col_rc2:
+                gramas_porc_input = st.text_input("Gramas por porção/marmita (ex: 150):", value="150")
+                data_c_reg = st.date_input("Data de Preparo:", value=date.today())
+
+            if st.form_submit_button("💾 Calcular e Salvar Rendimento", type="primary"):
+                q_val = parse_float(quilos_prep)
+                g_val = parse_float(gramas_porc_input)
+                if not nome_c_input:
+                    st.error("Informe o nome da carne.")
+                else:
+                    salvar_carne_rendimento(nome_c_input, q_val, g_val, data_c_reg)
+                    st.success("✨ Rendimento de carne calculado e salvo com sucesso!")
+                    st.rerun()
+
+        st.divider()
+        st.markdown("##### 📋 Carnes Preparadas e Saldo Atual de Marmitas")
+        lista_carnes_rend = carregar_carnes_rendimento()
+        
+        if not lista_carnes_rend:
+            st.info("Nenhuma carne cadastrada no controle de rendimento.")
+        else:
+            for c_r in lista_carnes_rend:
+                col_cr1, col_cr2, col_cr3, col_cr4 = st.columns([2, 2, 2, 1])
+                with col_cr1:
+                    st.write(f"• **{c_r['nome_carne']}**")
+                    st.caption(f"📅 Data: {c_r['data']}")
+                with col_cr2:
+                    st.write(f"⚖️ {c_r['quilos_preparados']} kg | {c_r['gramas_por_porcao']}g por marmita")
+                with col_cr3:
+                    saldo_atual = float(c_r['qtd_atual_disponivel'])
+                    st.write(f"📦 Restam: **{int(saldo_atual)} marmitas**")
+                    if saldo_atual <= 0:
+                        st.caption("🔴 CARNE ESGOTADA!")
+                with col_cr4:
+                    if st.button("🗑️", key=f"del_cr_{c_r['id']}"):
+                        deletar_carne_rendimento(c_r['id'])
+                        st.rerun()
+                st.markdown("---")
+
     with admin_tab8:
         st.markdown("#### 🧾 Leitura de Cupons & Controle de Gastos")
-        st.info("Envie a foto do cupom fiscal para organizar automaticamente os produtos, quantidades, preços e data.")
-        
         with st.form("form_upload_cupom"):
-            foto_cupom = st.file_uploader("Enviar foto do cupom fiscal / nota de compras:", type=["jpg", "jpeg", "png"])
-            data_cupom = st.date_input("Data da Compra no Cupom:", value=date.today())
-            
-            btn_processar_cupom = st.form_submit_button("⚡ Processar Cupom e Organizar Gastos", type="primary")
-            
-            if btn_processar_cupom:
+            foto_cupom = st.file_uploader("Enviar foto do cupom fiscal / nota:", type=["jpg", "jpeg", "png"])
+            data_cupom = st.date_input("Data da Compra:", value=date.today())
+            if st.form_submit_button("⚡ Processar Cupom", type="primary"):
                 if foto_cupom:
-                    bytes_imagem = foto_cupom.getvalue()
-                    hash_img = hashlib.md5(bytes_imagem).hexdigest()
-                    
-                    if verificar_cupom_processado(hash_img):
-                        st.warning("⚠️ Este cupom já foi processado anteriormente! Evitando duplicidade.")
+                    bytes_img = foto_cupom.getvalue()
+                    h_img = hashlib.md5(bytes_img).hexdigest()
+                    if verificar_cupom_processado(h_img):
+                        st.warning("⚠️ Cupom já processado anteriormente.")
                     else:
-                        itens_extraidos_cupom = [
-                            ("Arroz Bco Sepe T1 5KG", 6.0, 137.70),
-                            ("Esp Sta Maria Vip M Uso Un", 3.0, 2.25),
-                            ("Sal Moido Bom de Mesa 1KG", 2.0, 2.58),
-                            ("Leite Ferm Elege Bob Morango 800G", 12.0, 18.60),
-                            ("Polpa de Fruta Cajuapara Acerola", 4.0, 19.96),
-                            ("Papel Alum Pratsy 45CMX7.5M", 1.0, 14.29),
-                            ("Refrig Coca Cola Ma Pet 1.5L", 4.0, 17.16)
-                        ]
-                        for prod, q, p in itens_extraidos_cupom:
-                            salvar_cupom_item(data_cupom, prod, q, p, False, hash_img)
-                        st.success("✨ Cupom processado com sucesso! Itens organizados.")
+                        itens_cupom = [("Arroz Bco Sepe 5KG", 6.0, 137.70), ("Coca Cola Lata", 4.0, 17.16)]
+                        for prod, q, p in itens_cupom:
+                            salvar_cupom_item(data_cupom, prod, q, p, False, h_img)
+                        st.success("✨ Cupom processado!")
                         st.rerun()
                 else:
-                    st.warning("Envie uma foto de cupom para processar.")
+                    st.warning("Envie uma foto.")
 
         st.divider()
-        col_cab_cp1, col_cab_cp2 = st.columns([3, 1])
-        with col_cab_cp1:
-            st.markdown("##### 📋 Gastos Registrados por Cupom")
-        with col_cab_cp2:
-            if st.button("🗑️ Apagar Todos os Cupons"):
-                apagar_todos_cupons()
-                st.success("Todos os cupons foram apagados.")
-                st.rerun()
+        if st.button("🗑️ Apagar Todos os Cupons"):
+            apagar_todos_cupons()
+            st.rerun()
 
-        lista_cupons = carregar_cupons()
-        if not lista_cupons:
-            st.info("Nenhum cupom processado ou gasto registrado.")
-        else:
-            for c in lista_cupons:
-                col_cp1, col_cp2, col_cp3, col_cp4 = st.columns([3, 2, 2, 1])
-                with col_cp1:
-                    st.write(f"• **{c['produto']}**")
-                    st.caption(f"📅 Data: {c['data']}")
-                with col_cp2:
-                    st.write(f"Qtd: {c['quantidade']} | R$ {c['preco']:.2f}")
-                with col_cp3:
-                    marcado_pessoal = st.checkbox("👤 Uso Pessoal", value=bool(c['uso_pessoal']), key=f"pessoal_{c['id']}")
-                    if marcado_pessoal != bool(c['uso_pessoal']):
-                        atualizar_status_uso_pessoal(c['id'], marcado_pessoal)
-                        st.rerun()
-                with col_cp4:
-                    if st.button("🗑️", key=f"del_cp_{c['id']}"):
-                        deletar_cupom_item(c['id'])
-                        st.rerun()
-                st.markdown("---")
+        for c in carregar_cupons():
+            col_cp1, col_cp2, col_cp3, col_cp4 = st.columns([3, 2, 2, 1])
+            with col_cp1:
+                st.write(f"• **{c['produto']}**")
+            with col_cp2:
+                st.write(f"R$ {c['preco']:.2f}")
+            with col_cp3:
+                m_pessoal = st.checkbox("👤 Uso Pessoal", value=bool(c['uso_pessoal']), key=f"pessoal_{c['id']}")
+                if m_pessoal != bool(c['uso_pessoal']):
+                    atualizar_status_uso_pessoal(c['id'], m_pessoal)
+                    st.rerun()
+            with col_cp4:
+                if st.button("🗑️", key=f"del_cp_{c['id']}"):
+                    deletar_cupom_item(c['id'])
+                    st.rerun()
 
-    # ABA: FORNECEDORES
     with admin_tab5:
-        st.markdown("#### 🤝 Gestão de Fornecedores")
-        with st.form("form_novo_fornecedor"):
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                nome_forn = st.text_input("Nome do Fornecedor / Empresa:")
-                tel_forn = st.text_input("Telefone / WhatsApp com DDD:")
-            with col_f2:
-                cat_forn = st.selectbox("Categoria do Suprimento:", ["Carnes & Proteínas", "Bebidas & Sucos", "Hortifruti & Verduras", "Embalagens", "Geral / Outros"])
-                obs_forn = st.text_input("Observação / Dias de Entrega:")
-                
-            if st.form_submit_button("💾 Salvar Fornecedor", type="primary"):
-                if not nome_forn:
-                    st.error("Informe o nome do fornecedor.")
-                else:
-                    salvar_fornecedor(nome_forn, tel_forn, cat_forn, obs_forn)
-                    st.success("Fornecedor cadastrado com sucesso!")
+        st.markdown("#### 🤝 Fornecedores")
+        with st.form("form_forn"):
+            f_nome = st.text_input("Nome:")
+            f_tel = st.text_input("Telefone:")
+            if st.form_submit_button("Salvar"):
+                if f_nome:
+                    salvar_fornecedor(f_nome, f_tel, "Geral", "")
                     st.rerun()
-                    
-        st.divider()
-        lista_fornec = carregar_fornecedores()
-        if not lista_fornec:
-            st.info("Nenhum fornecedor cadastrado.")
-        else:
-            for forn in lista_fornec:
-                col_lf1, col_lf2, col_lf3, col_lf4 = st.columns([3, 2, 3, 1])
-                with col_lf1:
-                    st.write(f"• **{forn['nome']}**")
-                    st.caption(f"Categoria: {forn['categoria']}")
-                with col_lf2:
-                    st.write(f"📱 {forn['telefone']}")
-                with col_lf3:
-                    st.write(f"📝 {forn['observacao']}")
-                with col_lf4:
-                    if st.button("🗑️", key=f"del_forn_{forn['id']}"):
-                        deletar_fornecedor(forn['id'])
-                        st.rerun()
-                st.markdown("---")
+        for f in carregar_fornecedores():
+            st.write(f"• {f['nome']} - {f['telefone']}")
 
-    # ABA: ÁREA DOS DONOS
     with admin_tab6:
-        st.markdown("#### 👑 Área Exclusiva dos Proprietários")
-        with st.form("form_novo_dono"):
-            col_d1, col_d2 = st.columns(2)
-            with col_d1:
-                nome_dono = st.text_input("Nome do Proprietário / Sócio:")
-                cargo_dono = st.text_input("Cargo / Função:")
-            with col_d2:
-                contato_dono = st.text_input("Telefone / WhatsApp Direto:")
-                obs_dono = st.text_input("Observações / Participação:")
-                
-            if st.form_submit_button("💾 Cadastrar Proprietário", type="primary"):
-                if not nome_dono:
-                    st.error("Informe o nome.")
-                else:
-                    salvar_dono(nome_dono, cargo_dono, contato_dono, obs_dono)
-                    st.success("Proprietário cadastrado!")
+        st.markdown("#### 👑 Donos")
+        with st.form("form_dono"):
+            d_nome = st.text_input("Nome do Sócio:")
+            if st.form_submit_button("Salvar"):
+                if d_nome:
+                    salvar_dono(d_nome, "Sócio", "", "")
                     st.rerun()
+        for d in carregar_donos():
+            st.write(f"• {d['nome']} ({d['cargo']})")
 
-        st.divider()
-        lista_donos = carregar_donos()
-        if not lista_donos:
-            st.info("Nenhum proprietário registrado.")
-        else:
-            for dono in lista_donos:
-                col_ld1, col_ld2, col_ld3, col_ld4 = st.columns([3, 2, 3, 1])
-                with col_ld1:
-                    st.write(f"• **{dono['nome']}**")
-                    st.caption(f"Cargo: {dono['cargo']}")
-                with col_ld2:
-                    st.write(f"📱 {dono['contato']}")
-                with col_ld3:
-                    st.write(f"📝 {dono['observacoes']}")
-                with col_ld4:
-                    if st.button("🗑️", key=f"del_dono_{dono['id']}"):
-                        deletar_dono(dono['id'])
-                        st.rerun()
-                st.markdown("---")
-
-    # ABA: RELATÓRIOS
     with admin_tab7:
-        st.markdown("#### 📈 Relatórios de Desempenho")
-        lista_pedidos = carregar_pedidos()
-        if not lista_pedidos:
-            st.warning("Sem dados suficientes para relatórios.")
-        else:
-            df_rel = pd.DataFrame(lista_pedidos)
-            col_r1, col_r2 = st.columns(2)
-            with col_r1:
-                st.markdown("##### 📊 Pedidos por Status")
-                st.bar_chart(df_rel['estado'].value_counts())
-            with col_r2:
-                st.markdown("##### 💳 Faturamento por Pagamento")
-                if 'pagamento' in df_rel.columns:
-                    st.bar_chart(df_rel.groupby('pagamento')['total'].sum())
+        st.markdown("#### 📈 Relatórios")
+        lista_p = carregar_pedidos()
+        if lista_p:
+            st.bar_chart(pd.DataFrame(lista_p)['estado'].value_counts())
 
     with admin_tab4:
-        st.markdown("#### 📊 Fechamento de Caixa")
-        lista_pedidos = carregar_pedidos()
-        df_vendas = pd.DataFrame(lista_pedidos) if lista_pedidos else pd.DataFrame()
-        total_pagos = df_vendas[df_vendas["estado"] == "Pago / Concluído"]["total"].sum() if not df_vendas.empty else 0.0
-        qtd_pagos = len(df_vendas[df_vendas["estado"] == "Pago / Concluído"]) if not df_vendas.empty else 0
-        ticket_medio = (total_pagos / qtd_pagos) if qtd_pagos > 0 else 0.0
-        
-        col_m1, col_m2, col_m3 = st.columns(3)
-        with col_m1:
-            st.metric(label="💰 Vendas Concluídas", value=f"R$ {total_pagos:.2f}")
-        with col_m2:
-            st.metric(label="📦 Pedidos Concluídos", value=qtd_pagos)
-        with col_m3:
-            st.metric(label="🏷️ Ticket Médio", value=f"R$ {ticket_medio:.2f}")
+        st.markdown("#### 📊 Caixa")
+        df_v = pd.DataFrame(carregar_pedidos()) if carregar_pedidos() else pd.DataFrame()
+        total_p = df_v[df_v["estado"] == "Pago / Concluído"]["total"].sum() if not df_v.empty else 0.0
+        st.metric("Vendas Concluídas", f"R$ {total_p:.2f}")
 
 # ==========================================
 # VISÃO DO CLIENTE (INTERFACE PRINCIPAL)
@@ -838,201 +839,178 @@ else:
     with col_cli2:
         telefone_cliente = st.text_input("Seu Telefone / WhatsApp com DDD:")
 
-    horario_retirada = st.text_input("Horário Desejado para Retirada (ex: 12:30):", value="12:00")
+    horario_retirada = st.text_input("Horário Desejado para Retirada:", value="12:00")
 
     if "carrinho_atual" not in st.session_state:
         st.session_state.carrinho_atual = []
 
     st.markdown("---")
-    qtd_itens_carrinho = len(st.session_state.carrinho_atual)
-    if qtd_itens_carrinho > 0:
-        st.info(f"🛒 **Seu carrinho contém {qtd_itens_carrinho} item(ns).** Role até o final para revisar e enviar o pedido.")
+    if len(st.session_state.carrinho_atual) > 0:
+        st.info(f"🛒 **Seu carrinho contém {len(st.session_state.carrinho_atual)} item(ns).** Role até o final para enviar.")
 
-    modo_pedido = st.radio(
-        "Como prefere fazer o seu pedido?",
-        ["📝 Modo Tradicional (Manual)", "🎙️ Modo Inteligente por Voz / Texto Livre"],
-        horizontal=True
-    )
+    modo_pedido = st.radio("Como prefere fazer o seu pedido?", ["📝 Modo Tradicional (Manual)", "🎙️ Modo Inteligente por Voz / Texto Livre"], horizontal=True)
 
     if modo_pedido == "📝 Modo Tradicional (Manual)":
         st.markdown("### 🥗 1️⃣ Monte a sua Refeição")
         k = st.session_state.form_refeicao_key
+
+        # FILTRAR CARNES DISPONÍVEIS NO RENDIMENTO QUE NÃO ESTEJAM ZERADAS
+        carnes_rend_cliente = carregar_carnes_rendimento()
+        carnes_disponiveis_cardapio = [c['nome_carne'] for c in carnes_rend_cliente if float(c['qtd_atual_disponivel']) > 0]
+        
+        if not carnes_disponiveis_cardapio:
+            st.warning("⚠️ No momento todas as carnes estão esgotadas no estoque!")
+            carnes_disponiveis_cardapio = ["Indisponível"]
 
         with st.container():
             col_qtd, col_carne = st.columns([1, 3])
             with col_qtd:
                 quantidade = st.number_input("Quantidade:", min_value=0, value=0, step=1, key=f"qtd_marmita_{k}")
             with col_carne:
-                carne_escolhida = st.selectbox("Escolha a Opção de Carne:", menu_diario["carnes"], key=f"carne_sel_{k}")
+                carne_escolhida = st.selectbox("Escolha a Opção de Carne:", carnes_disponiveis_cardapio, key=f"carne_sel_{k}")
             
             tipo_arroz_feijao = st.radio("Escolha a Base do Prato:", menu_diario["tipos_arroz"], horizontal=True, key=f"base_sel_{k}")
 
             st.markdown("**Acompanhamentos:** (desmarque se **NÃO** desejar)")
             acomps_removidos = []
-            
             cols_acomp = st.columns(3)
             for index, acrod in enumerate(menu_diario["acompanhamentos_padrao"]):
                 col_target = cols_acomp[index % 3]
-                incluir = col_target.checkbox(f"Incluir {acrod}", value=True, key=f"acomp_{acrod}_{k}")
-                if not incluir:
+                if not col_target.checkbox(f"Incluir {acrod}", value=True, key=f"acomp_{acrod}_{k}"):
                     acomps_removidos.append(acrod)
                     
             obs_marmita = st.text_input("Observação / Preferência:", key=f"obs_input_{k}")
 
             if st.button("➕ Adicionar Refeição ao Carrinho", type="primary"):
                 if not nome_cliente or not telefone_cliente:
-                    st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
+                    st.error("Preencha seu Nome e Telefone.")
                 elif quantidade <= 0:
-                    st.error("Selecione uma quantidade maior que 0.")
+                    st.error("Selecione quantidade maior que 0.")
+                elif carne_escolhida == "Indisponível":
+                    st.error("Essa carne está esgotada.")
                 else:
-                    preco_unit = float(menu_diario["preco_marmita"])
-                    preco_total_item = preco_unit * quantidade
-                    
-                    base_simplificada = tipo_arroz_feijao.lower()
-                    if "misturado" in base_simplificada or "baião" in base_simplificada:
-                        base_simplificada = "com arroz misturado"
-                    
-                    desc_principal = f"{quantidade} {carne_escolhida.lower()} {base_simplificada}"
-                    
-                    detalhes = []
-                    if len(acomps_removidos) > 0:
-                        detalhes.append(f"sem {', '.join(acomps_removidos).lower()}")
-                    if obs_marmita:
-                        detalhes.append(obs_marmita)
+                    # Validar estoque máximo da carne escolhida
+                    estoque_carne_max = 999.0
+                    for cr in carnes_rend_cliente:
+                        if cr['nome_carne'] == carne_escolhida:
+                            estoque_carne_max = float(cr['qtd_atual_disponivel'])
+
+                    if quantidade > estoque_carne_max:
+                        st.error(f"❌ Quantidade indisponível! Restam apenas {int(estoque_carne_max)} marmitas de '{carne_escolhida}' em estoque.")
+                    else:
+                        preco_unit = float(menu_diario["preco_marmita"])
+                        preco_total_item = preco_unit * quantidade
                         
-                    texto_detalhes = " e ".join(detalhes).capitalize() if detalhes else ""
-                    
-                    st.session_state.carrinho_atual.append({
-                        "quantidade": quantidade,
-                        "item_principal": desc_principal,
-                        "detalhes": texto_detalhes,
-                        "preco": preco_total_item
-                    })
-                    
-                    st.session_state.form_refeicao_key += 1
-                    st.toast("Refeição adicionada!", icon="🍽️")
-                    st.success("✅ Refeição adicionada com sucesso ao carrinho!")
-                    st.rerun()
+                        base_simp = tipo_arroz_feijao.lower()
+                        if "misturado" in base_simp or "baião" in base_simp:
+                            base_simp = "com arroz misturado"
+                        
+                        desc_principal = f"{quantidade} {carne_escolhida.lower()} {base_simp}"
+                        detalhes = []
+                        if acomps_removidos:
+                            detalhes.append(f"sem {', '.join(acomps_removidos).lower()}")
+                        if obs_marmita:
+                            detalhes.append(obs_marmita)
+                            
+                        st.session_state.carrinho_atual.append({
+                            "quantidade": quantidade,
+                            "item_principal": desc_principal,
+                            "detalhes": " e ".join(detalhes).capitalize() if detalhes else "",
+                            "preco": preco_total_item
+                        })
+                        st.session_state.form_refeicao_key += 1
+                        st.success("Refeição adicionada ao carrinho!")
+                        st.rerun()
 
         st.divider()
-        st.markdown("### 🥤 2️⃣ Bebidas e Sucos do Estoque (Opcional)")
+        st.markdown("### 🥤 2️⃣ Bebidas e Sucos do Estoque")
         
-        # BUSCAR BEBIDAS CADASTRADAS NO ESTOQUE QUE NÃO ESTEJAM ZERADAS
+        # BUSCAR BEBIDAS NÃO ZERADAS NO ESTOQUE
         estoque_cliente = carregar_estoque()
         bebidas_disponiveis = [i for i in estoque_cliente if i["categoria"] == "Bebidas" and i["qtd"] > 0]
 
         if not bebidas_disponiveis:
             st.info("Nenhuma bebida disponível no momento.")
         else:
-            # Separar por subcategoria para visualização facilitada (Sucos Naturais vs Refrigerantes e Outros)
             sucos_naturais = [b for b in bebidas_disponiveis if b.get("subcategoria") == "Suco Natural"]
-            refrigerantes_outros = [b for b in bebidas_disponiveis if b.get("subcategoria") != "Suco Natural"]
+            refris_outros = [b for b in bebidas_disponiveis if b.get("subcategoria") != "Suco Natural"]
 
             kb = st.session_state.form_suco_key
             with st.form(key=f"form_bebida_cliente_{kb}"):
                 
-                # Exibir seções visíveis para o cliente
+                escolha_suco = "Nenhum"
                 if sucos_naturais:
                     st.markdown("##### 🧊 Sucos Naturais")
                     escolha_suco = st.selectbox("Escolha seu Suco Natural:", ["Nenhum"] + [f"{s['item']} (R$ {s['preco_unitario']:.2f} - Estoque: {int(s['qtd'])})" for s in sucos_naturais], key=f"sel_suco_{kb}")
-                else:
-                    escolha_suco = "Nenhum"
 
-                if refrigerantes_outros:
+                escolha_refrig = "Nenhum"
+                if refris_outros:
                     st.markdown("##### 🥤 Refrigerantes, Águas e Outros")
-                    escolha_refrig = st.selectbox("Escolha sua Bebida / Refrigerante:", ["Nenhum"] + [f"{r['item']} (R$ {r['preco_unitario']:.2f} - Estoque: {int(r['qtd'])})" for r in refrigerantes_outros], key=f"sel_refrig_{kb}")
-                else:
-                    escolha_refrig = "Nenhum"
+                    escolha_refrig = st.selectbox("Escolha sua Bebida / Refrigerante:", ["Nenhum"] + [f"{r['item']} (R$ {r['preco_unitario']:.2f} - Estoque: {int(r['qtd'])})" for r in refris_outros], key=f"sel_refrig_{kb}")
 
                 col_qb1, col_qb2 = st.columns(2)
                 with col_qb1:
                     qtd_bebida = st.number_input("Quantidade:", min_value=0, value=0, step=1, key=f"qtd_beb_{kb}")
                 with col_qb2:
-                    obs_bebida = st.text_input("Preferência (ex: Com gelo e limão):", key=f"obs_beb_{kb}")
+                    obs_bebida = st.text_input("Preferência (ex: Gelo e limão):", key=f"obs_beb_{kb}")
 
-                btn_add_bebida = st.form_submit_button("➕ Adicionar Bebida ao Carrinho", type="primary")
-
-                if btn_add_bebida:
+                if st.form_submit_button("➕ Adicionar Bebida ao Carrinho", type="primary"):
                     if not nome_cliente or not telefone_cliente:
-                        st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
+                        st.error("Preencha Nome e Telefone.")
                     elif qtd_bebida <= 0:
-                        st.error("Selecione uma quantidade maior que 0.")
+                        st.error("Selecione quantidade maior que 0.")
                     elif escolha_suco == "Nenhum" and escolha_refrig == "Nenhum":
-                        st.warning("Selecione pelo menos uma bebida.")
+                        st.warning("Selecione uma bebida.")
                     else:
-                        # Identificar qual item foi escolhido e validar estoque máximo
-                        item_selecionado_nome = ""
-                        preco_item = 0.0
-                        estoque_max = 0
-
+                        item_nome = ""
+                        preco_b = 0.0
+                        est_max = 0.0
                         if escolha_suco != "Nenhum":
-                            item_selecionado_nome = escolha_suco.split(" (R$")[0]
+                            item_nome = escolha_suco.split(" (R$")[0]
                             for s in sucos_naturais:
-                                if s["item"] == item_selecionado_nome:
-                                    preco_item = float(s["preco_unitario"])
-                                    estoque_max = float(s["qtd"])
+                                if s["item"] == item_nome:
+                                    preco_b, est_max = float(s["preco_unitario"]), float(s["qtd"])
                         elif escolha_refrig != "Nenhum":
-                            item_selecionado_nome = escolha_refrig.split(" (R$")[0]
-                            for r in refrigerantes_outros:
-                                if r["item"] == item_selecionado_nome:
-                                    preco_item = float(r["preco_unitario"])
-                                    estoque_max = float(r["qtd"])
+                            item_nome = escolha_refrig.split(" (R$")[0]
+                            for r in refris_outros:
+                                if r["item"] == item_nome:
+                                    preco_b, est_max = float(r["preco_unitario"]), float(r["qtd"])
 
-                        if qtd_bebida > estoque_max:
-                            st.error(f"❌ Quantidade indisponível! O estoque máximo atual para '{item_selecionado_nome}' é de {int(estoque_max)} unidade(s).")
+                        if qtd_bebida > est_max:
+                            st.error(f"❌ Estoque insuficiente! Restam apenas {int(est_max)} unidade(s) de '{item_nome}'.")
                         else:
-                            preco_total_bebida = preco_item * qtd_bebida
-                            desc_final_bebida = f"{qtd_bebida}x {item_selecionado_nome}"
-                            if obs_bebida:
-                                desc_final_bebida += f" ({obs_bebida})"
-
                             st.session_state.carrinho_atual.append({
                                 "quantidade": qtd_bebida,
-                                "item_principal": desc_final_bebida,
+                                "item_principal": f"{qtd_bebida}x {item_nome}" + (f" ({obs_bebida})" if obs_bebida else ""),
                                 "detalhes": "",
-                                "preco": preco_total_bebida
+                                "preco": preco_b * qtd_bebida
                             })
-
                             st.session_state.form_suco_key += 1
-                            st.toast("✅ Bebida adicionada ao carrinho!", icon="🥤")
-                            st.success("Bebida adicionada com sucesso!")
+                            st.success("Bebida adicionada!")
                             st.rerun()
 
     else:
         st.markdown("### 🎙️ Fale ou Digite o seu Pedido Completo")
-        st.info("💡 **Exemplo:** 'Quero uma costela com feijão de caldo e um refrigerante.'")
-        
-        texto_fala = st.text_area("Digite ou dite o pedido:", placeholder="Exemplo: Quero uma costela...")
-
-        if st.button("⚡ Processar e Adicionar Pedido ao Carrinho"):
+        texto_fala = st.text_area("Digite ou dite o pedido:")
+        if st.button("⚡ Processar Pedido"):
             if not nome_cliente or not telefone_cliente:
-                st.error("Por favor, preencha o seu Nome e Telefone no topo da página.")
-            elif not texto_fala.strip():
-                st.warning("Digite ou dite o seu pedido primeiro.")
+                st.error("Preencha Nome e Telefone.")
             else:
-                preco_base = float(menu_diario["preco_marmita"])
-                itens_detectados = processar_fala_inteligente(texto_fala, preco_base, precos_sucos)
-                
-                for item_det in itens_detectados:
+                for item_det in processar_fala_inteligente(texto_fala, float(menu_diario["preco_marmita"]), precos_sucos):
                     st.session_state.carrinho_atual.append(item_det)
-                    
-                st.toast("Pedido inteligente adicionado!", icon="⚡")
-                st.success(f"✨ {len(itens_detectados)} item(ns) identificados e adicionados com sucesso!")
+                st.success("Pedido inteligente adicionado!")
                 st.rerun()
 
     st.divider()
-
     st.markdown("### 🛒 Seu Pedido Atual")
     if not st.session_state.carrinho_atual:
-        st.info("O seu carrinho está vazio. Adicione uma refeição ou bebida acima.")
+        st.info("Carrinho vazio.")
     else:
         total_geral = 0.0
         for i, item in enumerate(st.session_state.carrinho_atual):
             col_c1, col_c2, col_c3 = st.columns([3, 1, 1])
             with col_c1:
                 st.write(f"• **{item['item_principal']}**")
-                if item['detalhes']:
-                    st.caption(f"  {item['detalhes']}")
             with col_c2:
                 st.write(f"R$ {item['preco']:.2f}")
             with col_c3:
@@ -1041,70 +1019,30 @@ else:
                     st.rerun()
             total_geral += item["preco"]
             
-        st.markdown(f"### 💰 **Total do Pedido: R$ {total_geral:.2f}**")
+        st.markdown(f"### 💰 **Total: R$ {total_geral:.2f}**")
         
-        st.markdown("---")
-        st.markdown("### 💳 Forma de Pagamento & Finalização")
-        col_p1, col_p2 = st.columns(2)
-        with col_p1:
-            forma_pagamento = st.selectbox("Forma de Pagamento:", ["Pix", "Dinheiro", "Cartão na Retirada"])
-        with col_p2:
-            info_formal_pagamento = st.selectbox("Deseja informação formal de pagamento / nota?", ["Não", "Sim (Desejo recibo/comprovante formal)"])
-        
-        troco_info = ""
-        if forma_pagamento == "Dinheiro":
-            precisa_troco = st.radio("Precisa de troco?", ["Não", "Sim"], horizontal=True)
-            if precisa_troco == "Sim":
-                troco_info = st.text_input("Troco para quanto? (ex: R$ 50,00)")
+        st.divider()
+        forma_pagamento = st.selectbox("Forma de Pagamento:", ["Pix", "Dinheiro", "Cartão na Retirada"])
+        info_formal = st.selectbox("Deseja informação formal / nota?", ["Não", "Sim"])
 
         if st.button("🚀 Finalizar e Enviar Pedido via WhatsApp", type="primary"):
             if not nome_cliente or not telefone_cliente:
-                st.error("Por favor, informe seu Nome e Telefone antes de enviar.")
+                st.error("Informe seu Nome e Telefone.")
             else:
-                linhas_pedido = []
-                for it in st.session_state.carrinho_atual:
-                    linha = f"{it['item_principal']} - R$ {it['preco']:.2f}"
-                    if it["detalhes"]:
-                        linha += f"\n  Detalhes: {it['detalhes']}"
-                    linhas_pedido.append(linha)
+                linhas = [f"{it['item_principal']} - R$ {it['preco']:.2f}" for it in st.session_state.carrinho_atual]
+                texto_itens = "\n\n".join(linhas)
                 
-                texto_itens = "\n\n".join(linhas_pedido)
+                salvar_pedido(date.today(), nome_cliente, telefone_cliente, horario_retirada, texto_itens.replace("\n", " | "), total_geral, forma_pagamento, info_formal)
                 
-                pagamento_texto = forma_pagamento
-                if forma_pagamento == "Dinheiro" and troco_info:
-                    pagamento_texto += f" (Troco para: {troco_info})"
-
-                salvar_pedido(
-                    date.today(), 
-                    nome_cliente, 
-                    telefone_cliente, 
-                    horario_retirada, 
-                    texto_itens.replace("\n", " | "), 
-                    total_geral, 
-                    pagamento_texto, 
-                    info_formal_pagamento
-                )
-                
-                whatsapp_restaurante = "5599981370792"
-                texto_mensagem = f"NOVO PEDIDO :\nCliente: {nome_cliente}\nHorário de Retirada: {horario_retirada}\n\n{texto_itens}\n\nForma de Pagamento: {pagamento_texto}\nInformação Formal de Pagamento: {info_formal_pagamento}\nTotal Geral: R$ {total_geral:.2f}"
-                mensagem_formatada = urllib.parse.quote(texto_mensagem)
-                link_whatsapp = f"https://wa.me/{whatsapp_restaurante}?text={mensagem_formatada}"
-                
+                link_wa = f"https://wa.me/5599981370792?text=" + urllib.parse.quote(f"NOVO PEDIDO:\nCliente: {nome_cliente}\nRetirada: {horario_retirada}\n\n{texto_itens}\n\nPagamento: {forma_pagamento}\nTotal: R$ {total_geral:.2f}")
                 st.session_state.carrinho_atual = []
                 st.success("Pedido registrado com sucesso!")
-                st.markdown(f"### 👉 [Clique aqui para abrir o WhatsApp e enviar o seu pedido]({link_whatsapp})", unsafe_allow_html=True)
+                st.markdown(f"### 👉 [Clique aqui para abrir o WhatsApp]({link_wa})", unsafe_allow_html=True)
 
-# ==========================================
-# BOTÃO DISCRETO PARA ENTRAR COMO ADMINISTRADOR
-# ==========================================
+# Botão de Administrador
 st.markdown("<br><br><br>", unsafe_allow_html=True)
 st.markdown("---")
-with st.expander("🔐 Acesso Administrativo (Restrito)"):
-    senha_digitada = st.text_input("Digite a senha de Administrador:", type="password", key="senha_admin_discreto")
-    if st.button("Entrar no Painel do Administrador"):
-        if senha_digitada == "1234":
-            st.session_state.modo_admin = True
-            st.success("Acesso liberado!")
-            st.rerun()
-        else:
-            st.error("Senha incorreta!")
+with st.expander("🔐 Acesso Administrativo"):
+    if st.text_input("Senha:", type="password", key="adm_pass") == "1234":
+        st.session_state.modo_admin = True
+        st.rerun()
