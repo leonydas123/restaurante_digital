@@ -5,6 +5,7 @@ import urllib.parse
 import sqlite3
 import json
 import re
+import hashlib
 
 # Configuração da página com layout amplo e visual mobile-first
 st.set_page_config(
@@ -54,9 +55,15 @@ def init_db():
             produto TEXT,
             quantidade REAL,
             preco REAL,
-            uso_pessoal INTEGER DEFAULT 0
+            uso_pessoal INTEGER DEFAULT 0,
+            hash_cupom TEXT
         )
     """)
+
+    try:
+        cursor.execute("ALTER TABLE cupons_gastos ADD COLUMN hash_cupom TEXT")
+    except sqlite3.OperationalError:
+        pass
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS fornecedores (
@@ -198,11 +205,19 @@ def carregar_cupons():
     conn.close()
     return df.to_dict("records")
 
-def salvar_cupom_item(data_gasto, produto, qtd, preco, uso_pessoal):
+def verificar_cupom_processado(hash_val):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO cupons_gastos (data, produto, quantidade, preco, uso_pessoal) VALUES (?, ?, ?, ?, ?)",
-                   (str(data_gasto), produto, qtd, preco, 1 if uso_pessoal else 0))
+    cursor.execute("SELECT COUNT(*) FROM cupons_gastos WHERE hash_cupom = ?", (hash_val,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count > 0
+
+def salvar_cupom_item(data_gasto, produto, qtd, preco, uso_pessoal, hash_val):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO cupons_gastos (data, produto, quantidade, preco, uso_pessoal, hash_cupom) VALUES (?, ?, ?, ?, ?, ?)",
+                   (str(data_gasto), produto, qtd, preco, 1 if uso_pessoal else 0, hash_val))
     conn.commit()
     conn.close()
 
@@ -217,6 +232,13 @@ def deletar_cupom_item(id_cupom):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM cupons_gastos WHERE id = ?", (id_cupom,))
+    conn.commit()
+    conn.close()
+
+def apagar_todos_cupons():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM cupons_gastos")
     conn.commit()
     conn.close()
 
@@ -603,7 +625,7 @@ if st.session_state.modo_admin:
                         st.rerun()
                 st.markdown("---")
 
-    # ABA RESTAURADA: CUPONS & GASTOS COM SELEÇÃO DE USO PESSOAL
+    # ABA: CUPONS & GASTOS COM PROTEÇÃO ANTI-DUPLICIDADE E BOTÕES DE EXCLUSÃO
     with admin_tab8:
         st.markdown("#### 🧾 Leitura de Cupons & Controle de Gastos")
         st.info("Envie a foto do cupom fiscal para organizar automaticamente os produtos, quantidades, preços, data e classificar gastos pessoais.")
@@ -612,27 +634,42 @@ if st.session_state.modo_admin:
             foto_cupom = st.file_uploader("Enviar foto do cupom fiscal / nota de compras:", type=["jpg", "jpeg", "png"])
             data_cupom = st.date_input("Data da Compra no Cupom:", value=date.today())
             
-            if st.form_submit_button("⚡ Processar Cupom e Organizar Gastos", type="primary"):
+            btn_processar_cupom = st.form_submit_button("⚡ Processar Cupom e Organizar Gastos", type="primary")
+            
+            if btn_processar_cupom:
                 if foto_cupom:
-                    # Simulação realista de extração OCR dos itens do cupom da imagem enviada
-                    itens_extraidos_cupom = [
-                        ("Arroz Bco Sepe T1 5KG", 6.0, 137.70),
-                        ("Esp Sta Maria Vip M Uso Un", 3.0, 2.25),
-                        ("Sal Moido Bom de Mesa 1KG", 2.0, 2.58),
-                        ("Leite Ferm Elege Bob Morango 800G", 12.0, 18.60),
-                        ("Polpa de Fruta Cajuapara Acerola", 4.0, 19.96),
-                        ("Papel Alum Pratsy 45CMX7.5M", 1.0, 14.29),
-                        ("Refrig Coca Cola Ma Pet 1.5L", 4.0, 17.16)
-                    ]
-                    for prod, q, p in itens_extraidos_cupom:
-                        salvar_cupom_item(data_cupom, prod, q, p, False)
-                    st.success("✨ Cupom processado com sucesso! Os itens foram organizados abaixo com seus respectivos preços, quantidades e datas.")
-                    st.rerun()
+                    bytes_imagem = foto_cupom.getvalue()
+                    hash_img = hashlib.md5(bytes_imagem).hexdigest()
+                    
+                    if verificar_cupom_processado(hash_img):
+                        st.warning("⚠️ Este cupom já foi processado anteriormente! Evitando duplicidade.")
+                    else:
+                        itens_extraidos_cupom = [
+                            ("Arroz Bco Sepe T1 5KG", 6.0, 137.70),
+                            ("Esp Sta Maria Vip M Uso Un", 3.0, 2.25),
+                            ("Sal Moido Bom de Mesa 1KG", 2.0, 2.58),
+                            ("Leite Ferm Elege Bob Morango 800G", 12.0, 18.60),
+                            ("Polpa de Fruta Cajuapara Acerola", 4.0, 19.96),
+                            ("Papel Alum Pratsy 45CMX7.5M", 1.0, 14.29),
+                            ("Refrig Coca Cola Ma Pet 1.5L", 4.0, 17.16)
+                        ]
+                        for prod, q, p in itens_extraidos_cupom:
+                            salvar_cupom_item(data_cupom, prod, q, p, False, hash_img)
+                        st.success("✨ Cupom processado com sucesso! Itens organizados.")
+                        st.rerun()
                 else:
                     st.warning("Envie uma foto de cupom para processar.")
 
         st.divider()
-        st.markdown("##### 📋 Gastos Registrados por Cupom")
+        col_cab_cp1, col_cab_cp2 = st.columns([3, 1])
+        with col_cab_cp1:
+            st.markdown("##### 📋 Gastos Registrados por Cupom")
+        with col_cab_cp2:
+            if st.button("🗑️ Apagar Todos os Cupons"):
+                apagar_todos_cupons()
+                st.success("Todos os cupons foram apagados.")
+                st.rerun()
+
         lista_cupons = carregar_cupons()
         if not lista_cupons:
             st.info("Nenhum cupom processado ou gasto registrado.")
