@@ -989,7 +989,7 @@ else:
                             "preco": preco_total_item
                         })
                         st.session_state.form_refeicao_key += 1
-                        st.success("Refeição adicionada ao carrinho!")
+                        st.success("✅ Refeição adicionada ao carrinho com sucesso!")
                         st.rerun()
 
         st.divider()
@@ -1010,13 +1010,16 @@ else:
                     
                     col_qb1, col_qb2 = st.columns(2)
                     with col_qb1:
-                        qtd_bebida = st.number_input("Quantidade:", min_value=1, value=1, step=1, key=f"qtd_beb_{kb}")
+                        # CORRIGIDO: Quantidade começa em 0 para evitar duplicações acidentais
+                        qtd_bebida = st.number_input("Quantidade:", min_value=0, value=0, step=1, key=f"qtd_beb_{kb}")
                     with col_qb2:
                         obs_bebida = st.text_input("Preferência (ex: Gelada):", key=f"obs_beb_{kb}")
 
                     if st.form_submit_button("➕ Adicionar Refrigerante ao Carrinho", type="primary"):
                         if not nome_cliente or not telefone_cliente:
                             st.error("Preencha seu Nome e Telefone.")
+                        elif qtd_bebida <= 0:
+                            st.error("Selecione quantidade maior que 0.")
                         else:
                             item_nome = escolha_refrig.split(" (R$")[0]
                             preco_b, est_max = 0.0, 0.0
@@ -1034,7 +1037,8 @@ else:
                                     "preco": preco_b * qtd_bebida
                                 })
                                 st.session_state.form_suco_key += 1
-                                st.success("Refrigerante adicionado com sucesso!")
+                                # CORRIGIDO: Mensagem com selo de verificado
+                                st.success("✅ Refrigerante adicionado ao carrinho com sucesso!")
                                 st.rerun()
 
         else:
@@ -1051,7 +1055,8 @@ else:
                 with col_s2:
                     tamanho_suco = st.selectbox("Tamanho:", ["Copo de 300 ml", "Jarra de 1 L"])
                 with col_s3:
-                    qtd_suco = st.number_input("Qtd:", min_value=1, value=1, step=1)
+                    # CORRIGIDO: Quantidade começa em 0 para evitar cliques acidentais
+                    qtd_suco = st.number_input("Qtd:", min_value=0, value=0, step=1)
                     
                 chave_tamanho_busca = "Copo (300 ml)" if "Copo" in tamanho_suco else "Jarra (1 L)"
                 chave_preco = f"{sabor_suco} - {chave_tamanho_busca}"
@@ -1064,6 +1069,8 @@ else:
                 if st.form_submit_button("➕ Adicionar Suco Natural ao Carrinho", type="primary"):
                     if not nome_cliente or not telefone_cliente:
                         st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
+                    elif qtd_suco <= 0:
+                        st.error("Selecione quantidade maior que 0.")
                     else:
                         tipo_recipiente = "copo" if "copo" in tamanho_suco.lower() else "jarra"
                         unidade_medida = "300 ml" if "copo" in tamanho_suco.lower() else "1 L"
