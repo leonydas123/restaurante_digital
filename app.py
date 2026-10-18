@@ -148,13 +148,11 @@ def init_db():
     cursor.execute("SELECT COUNT(*) FROM estoque")
     if cursor.fetchone()[0] == 0:
         itens_estoque_padrao = [
-            ("Coca Cola Lata 300ml", "Bebidas", "Refrigerante", 2.0, "UN", 6.00, 0.0, str(date.today())),
+            ("Coca Cola Lata 300ml", "Bebidas", "Refrigerante", 10.0, "UN", 6.00, 0.0, str(date.today())),
             ("Fanta Lata 300ml", "Bebidas", "Refrigerante", 20.0, "UN", 6.00, 0.0, str(date.today())),
-            ("Suco Natural de Acerola", "Bebidas", "Suco Natural", 15.0, "UN", 7.00, 0.0, str(date.today())),
             ("Água Mineral 500ml", "Bebidas", "Outros", 30.0, "UN", 4.00, 0.0, str(date.today())),
             ("Arroz", "Cozinha / Estocáveis", "Refrigerante", 25.0, "KG", 0.0, 0.150, str(date.today())),
             ("Feijão", "Cozinha / Estocáveis", "Refrigerante", 15.0, "KG", 0.0, 0.100, str(date.today())),
-            ("Coxão Mole", "Cozinha / Estocáveis", "Refrigerante", 7.0, "KG", 0.0, 0.300, str(date.today())),
             ("Marmita / Embalagem PBR", "Embalagens e Marmitas", "Refrigerante", 100.0, "UN", 0.0, 1.0, str(date.today()))
         ]
         cursor.executemany("INSERT INTO estoque (item, categoria, subcategoria, qtd, unidade, preco_unitario, consumo_por_marmita, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", itens_estoque_padrao)
@@ -361,7 +359,6 @@ def dar_baixa_estoque_completo(pedido_texto):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 1. Baixar estoque geral e bebidas
     estoque = pd.read_sql_query("SELECT * FROM estoque", conn).to_dict("records")
     linhas = pedido_texto.split("|")
     
@@ -372,13 +369,11 @@ def dar_baixa_estoque_completo(pedido_texto):
         if partes and partes[0].isdigit():
             qtd_pedido = int(partes[0])
 
-        # Verificar se algum item do estoque bate com a linha do pedido
         for item in estoque:
             if item["item"].lower() in linha_lower:
                 nova_qtd = max(0.0, item["qtd"] - qtd_pedido)
                 cursor.execute("UPDATE estoque SET qtd = ? WHERE id = ?", (nova_qtd, item["id"]))
         
-        # Baixar carne / rendimento de marmitas se mencionado
         carnes_db = pd.read_sql_query("SELECT * FROM rendimento_carnes", conn).to_dict("records")
         for carne in carnes_db:
             if carne["nome_carne"].lower() in linha_lower:
@@ -450,7 +445,7 @@ def processar_fala_inteligente(texto_fala, preco_marmita_base, precos_sucos_dict
         qtd_marmitas = 1
 
     partes = re.split(r'e|uma|outra|\,', texto)
-    partes_marmitas = [p.strip() for p in partes if ("costela" in p | "carne" in p or "feijão" in p or "marmita" in p or "salada" in p or "assado" in p)]
+    partes_marmitas = [p.strip() for p in partes if ("costela" in p or "carne" in p or "feijão" in p or "marmita" in p or "salada" in p or "assado" in p)]
     
     if not partes_marmitas:
         partes_marmitas = [texto_fala]
@@ -544,7 +539,7 @@ if st.session_state.modo_admin:
     st.markdown("""
         <div class='app-header'>
             <h1>🔒 Painel de Gestão & Administração</h1>
-            <p>Cardápio, Pedidos, Estoque, Rendimento de Carnes e Cupons.</p>
+            <p>Cardápio, Pedidos, Estoque, Rendimento de Carnes e Preços de Sucos.</p>
         </div>
     """, unsafe_allow_html=True)
     
@@ -583,19 +578,35 @@ if st.session_state.modo_admin:
         preco_marmita_novo = st.number_input("Preço Padrão (R$):", value=float(menu_diario["preco_marmita"]), step=1.00)
         
         st.divider()
-        st.markdown("#### 🧃 Gestão de Preços de Sucos")
+        st.markdown("#### 🧃 Gestão de Preços e Sabores de Sucos Naturais")
+        st.caption("Você pode alterar os preços existentes ou adicionar novas opções de sucos abaixo:")
+        
         novos_precos_sucos = {}
         for chave_suco, preco_atual in precos_sucos.items():
             novos_precos_sucos[chave_suco] = st.number_input(f"Preço ({chave_suco}) (R$):", min_value=0.0, value=float(preco_atual), step=0.50)
 
-        if st.button("💾 Salvar Alterações do Cardápio", type="primary"):
+        st.markdown("##### ➕ Adicionar Novo Sabor / Tamanho de Suco")
+        col_ns1, col_ns2, col_ns3 = st.columns(3)
+        with col_ns1:
+            novo_sabor_nome = st.text_input("Novo Sabor (ex: Graviola, Goiaba):")
+        with col_ns2:
+            novo_tamanho_opcao = st.selectbox("Tamanho do Suco:", ["Copo (300 ml)", "Jarra (1 L)"])
+        with col_ns3:
+            novo_preco_suco = st.number_input("Preço (R$):", value=8.00, step=0.50)
+
+        if st.button("💾 Salvar Alterações do Cardápio & Sucos", type="primary"):
             menu_diario["carnes"] = [c.strip() for c in novas_carnes.split(",") if c.strip()]
             menu_diario["tipos_arroz"] = [r.strip() for r in novos_tipos_arroz.split(",") if r.strip()]
             menu_diario["acompanhamentos_padrao"] = [a.strip() for a in novos_acompanhamentos.split(",") if a.strip()]
             menu_diario["preco_marmita"] = preco_marmita_novo
+            
+            if novo_sabor_nome.strip():
+                chave_nova = f"{novo_sabor_nome.strip().capitalize()} - {novo_tamanho_opcao}"
+                novos_precos_sucos[chave_nova] = novo_preco_suco
+                
             salvar_config("menu_diario", menu_diario)
             salvar_config("precos_sucos", novos_precos_sucos)
-            st.success("✨ Cardápio e preços atualizados!")
+            st.success("✨ Cardápio e preços de sucos atualizados com sucesso!")
             st.rerun()
             
     with admin_tab2:
@@ -626,7 +637,7 @@ if st.session_state.modo_admin:
                                                    key=f"status_sel_{ped['id']}")
                         if st.button("💾 Confirmar Status", key=f"btn_status_{ped['id']}"):
                             atualizar_status_pedido(ped['id'], novo_estado)
-                            st.success("Status atualizado e estoque baixado (se concluído)!")
+                            st.success("Status atualizado!")
                             st.rerun()
                             
                     with col_p2:
@@ -697,11 +708,9 @@ if st.session_state.modo_admin:
                         st.rerun()
                 st.markdown("---")
 
-    # NOVA ABA: RENDIMENTO DE CARNES POR GRAMAS E KG
+    # RENDIMENTO DE CARNES
     with admin_tab_carnes:
         st.markdown("#### 🥩 Controle de Rendimento de Carnes (Quilos ➔ Gramas ➔ Marmitas)")
-        st.info("Registre quantos quilos de carne foram preparados e quantas gramas vão em cada marmita. O sistema calculará o total de marmitas que podem ser vendidas!")
-
         with st.form("form_novo_rendimento_carne"):
             col_rc1, col_rc2 = st.columns(2)
             with col_rc1:
@@ -718,15 +727,13 @@ if st.session_state.modo_admin:
                     st.error("Informe o nome da carne.")
                 else:
                     salvar_carne_rendimento(nome_c_input, q_val, g_val, data_c_reg)
-                    st.success("✨ Rendimento de carne calculado e salvo com sucesso!")
+                    st.success("✨ Rendimento de carne calculado e salvo!")
                     st.rerun()
 
         st.divider()
-        st.markdown("##### 📋 Carnes Preparadas e Saldo Atual de Marmitas")
         lista_carnes_rend = carregar_carnes_rendimento()
-        
         if not lista_carnes_rend:
-            st.info("Nenhuma carne cadastrada no controle de rendimento.")
+            st.info("Nenhuma carne cadastrada.")
         else:
             for c_r in lista_carnes_rend:
                 col_cr1, col_cr2, col_cr3, col_cr4 = st.columns([2, 2, 2, 1])
@@ -854,7 +861,6 @@ else:
         st.markdown("### 🥗 1️⃣ Monte a sua Refeição")
         k = st.session_state.form_refeicao_key
 
-        # FILTRAR CARNES DISPONÍVEIS NO RENDIMENTO QUE NÃO ESTEJAM ZERADAS
         carnes_rend_cliente = carregar_carnes_rendimento()
         carnes_disponiveis_cardapio = [c['nome_carne'] for c in carnes_rend_cliente if float(c['qtd_atual_disponivel']) > 0]
         
@@ -889,7 +895,6 @@ else:
                 elif carne_escolhida == "Indisponível":
                     st.error("Essa carne está esgotada.")
                 else:
-                    # Validar estoque máximo da carne escolhida
                     estoque_carne_max = 999.0
                     for cr in carnes_rend_cliente:
                         if cr['nome_carne'] == carne_escolhida:
@@ -923,71 +928,92 @@ else:
                         st.rerun()
 
         st.divider()
-        st.markdown("### 🥤 2️⃣ Bebidas e Sucos do Estoque")
+        st.markdown("### 🥤 2️⃣ Bebidas e Sucos Naturais (Opcional)")
         
-        # BUSCAR BEBIDAS NÃO ZERADAS NO ESTOQUE
-        estoque_cliente = carregar_estoque()
-        bebidas_disponiveis = [i for i in estoque_cliente if i["categoria"] == "Bebidas" and i["qtd"] > 0]
+        tipo_bebida_aba = st.radio("Qual tipo de bebida deseja escolher?", ["🥤 Refrigerantes & Outros (Estoque)", "🧊 Sucos Naturais Feitos na Hora"], horizontal=True)
 
-        if not bebidas_disponiveis:
-            st.info("Nenhuma bebida disponível no momento.")
-        else:
-            sucos_naturais = [b for b in bebidas_disponiveis if b.get("subcategoria") == "Suco Natural"]
-            refris_outros = [b for b in bebidas_disponiveis if b.get("subcategoria") != "Suco Natural"]
+        if tipo_bebida_aba == "🥤 Refrigerantes & Outros (Estoque)":
+            estoque_cliente = carregar_estoque()
+            refris_outros = [i for i in estoque_cliente if i["categoria"] == "Bebidas" and i["qtd"] > 0]
 
-            kb = st.session_state.form_suco_key
-            with st.form(key=f"form_bebida_cliente_{kb}"):
-                
-                escolha_suco = "Nenhum"
-                if sucos_naturais:
-                    st.markdown("##### 🧊 Sucos Naturais")
-                    escolha_suco = st.selectbox("Escolha seu Suco Natural:", ["Nenhum"] + [f"{s['item']} (R$ {s['preco_unitario']:.2f} - Estoque: {int(s['qtd'])})" for s in sucos_naturais], key=f"sel_suco_{kb}")
+            if not refris_outros:
+                st.info("Nenhum refrigerante ou bebida disponível no momento.")
+            else:
+                kb = st.session_state.form_suco_key
+                with st.form(key=f"form_refrig_cliente_{kb}"):
+                    escolha_refrig = st.selectbox("Escolha sua Bebida:", [f"{r['item']} (R$ {r['preco_unitario']:.2f} - Estoque: {int(r['qtd'])})" for r in refris_outros], key=f"sel_refrig_{kb}")
+                    
+                    col_qb1, col_qb2 = st.columns(2)
+                    with col_qb1:
+                        qtd_bebida = st.number_input("Quantidade:", min_value=1, value=1, step=1, key=f"qtd_beb_{kb}")
+                    with col_qb2:
+                        obs_bebida = st.text_input("Preferência (ex: Gelada):", key=f"obs_beb_{kb}")
 
-                escolha_refrig = "Nenhum"
-                if refris_outros:
-                    st.markdown("##### 🥤 Refrigerantes, Águas e Outros")
-                    escolha_refrig = st.selectbox("Escolha sua Bebida / Refrigerante:", ["Nenhum"] + [f"{r['item']} (R$ {r['preco_unitario']:.2f} - Estoque: {int(r['qtd'])})" for r in refris_outros], key=f"sel_refrig_{kb}")
-
-                col_qb1, col_qb2 = st.columns(2)
-                with col_qb1:
-                    qtd_bebida = st.number_input("Quantidade:", min_value=0, value=0, step=1, key=f"qtd_beb_{kb}")
-                with col_qb2:
-                    obs_bebida = st.text_input("Preferência (ex: Gelo e limão):", key=f"obs_beb_{kb}")
-
-                if st.form_submit_button("➕ Adicionar Bebida ao Carrinho", type="primary"):
-                    if not nome_cliente or not telefone_cliente:
-                        st.error("Preencha Nome e Telefone.")
-                    elif qtd_bebida <= 0:
-                        st.error("Selecione quantidade maior que 0.")
-                    elif escolha_suco == "Nenhum" and escolha_refrig == "Nenhum":
-                        st.warning("Selecione uma bebida.")
-                    else:
-                        item_nome = ""
-                        preco_b = 0.0
-                        est_max = 0.0
-                        if escolha_suco != "Nenhum":
-                            item_nome = escolha_suco.split(" (R$")[0]
-                            for s in sucos_naturais:
-                                if s["item"] == item_nome:
-                                    preco_b, est_max = float(s["preco_unitario"]), float(s["qtd"])
-                        elif escolha_refrig != "Nenhum":
+                    if st.form_submit_button("➕ Adicionar Refrigerante ao Carrinho", type="primary"):
+                        if not nome_cliente or not telefone_cliente:
+                            st.error("Preencha seu Nome e Telefone.")
+                        else:
                             item_nome = escolha_refrig.split(" (R$")[0]
+                            preco_b, est_max = 0.0, 0.0
                             for r in refris_outros:
                                 if r["item"] == item_nome:
                                     preco_b, est_max = float(r["preco_unitario"]), float(r["qtd"])
 
-                        if qtd_bebida > est_max:
-                            st.error(f"❌ Estoque insuficiente! Restam apenas {int(est_max)} unidade(s) de '{item_nome}'.")
-                        else:
-                            st.session_state.carrinho_atual.append({
-                                "quantidade": qtd_bebida,
-                                "item_principal": f"{qtd_bebida}x {item_nome}" + (f" ({obs_bebida})" if obs_bebida else ""),
-                                "detalhes": "",
-                                "preco": preco_b * qtd_bebida
-                            })
-                            st.session_state.form_suco_key += 1
-                            st.success("Bebida adicionada!")
-                            st.rerun()
+                            if qtd_bebida > est_max:
+                                st.error(f"❌ Estoque insuficiente! Restam apenas {int(est_max)} unidade(s) de '{item_nome}'.")
+                            else:
+                                st.session_state.carrinho_atual.append({
+                                    "quantidade": qtd_bebida,
+                                    "item_principal": f"{qtd_bebida}x {item_nome}" + (f" ({obs_bebida})" if obs_bebida else ""),
+                                    "detalhes": "",
+                                    "preco": preco_b * qtd_bebida
+                                })
+                                st.session_state.form_suco_key += 1
+                                st.success("Refrigerante adicionado com sucesso!")
+                                st.rerun()
+
+        else:
+            # SUCOS NATURAIS
+            sabores_disponiveis = list(set([k.split(" - ")[0] for k in precos_sucos.keys()]))
+            if not sabores_disponiveis:
+                sabores_disponiveis = ["Acerola", "Cajá", "Maracujá"]
+
+            ks = st.session_state.form_suco_key
+            with st.form(key=f"form_suco_nat_{ks}"):
+                col_s1, col_s2, col_s3 = st.columns([2, 2, 1])
+                with col_s1:
+                    sabor_suco = st.selectbox("Sabor do Suco Natural:", sorted(sabores_disponiveis))
+                with col_s2:
+                    tamanho_suco = st.selectbox("Tamanho:", ["Copo de 300 ml", "Jarra de 1 L"])
+                with col_s3:
+                    qtd_suco = st.number_input("Qtd:", min_value=1, value=1, step=1)
+                    
+                chave_tamanho_busca = "Copo (300 ml)" if "Copo" in tamanho_suco else "Jarra (1 L)"
+                chave_preco = f"{sabor_suco} - {chave_tamanho_busca}"
+                preco_unit_suco = float(precos_sucos.get(chave_preco, 7.00))
+                preco_total_suco = preco_unit_suco * qtd_suco
+                
+                ponto_acucar = st.radio("Açúcar:", ["Com Açúcar", "Sem Açúcar", "Pouco Açúcar"], horizontal=True)
+                st.info(f"Valor Total ({qtd_suco}x): **R$ {preco_total_suco:.2f}**")
+
+                if st.form_submit_button("➕ Adicionar Suco Natural ao Carrinho", type="primary"):
+                    if not nome_cliente or not telefone_cliente:
+                        st.error("Por favor, preencha o seu Nome e Telefone acima antes de adicionar.")
+                    else:
+                        tipo_recipiente = "copo" if "copo" in tamanho_suco.lower() else "jarra"
+                        unidade_medida = "300 ml" if "copo" in tamanho_suco.lower() else "1 L"
+                        
+                        desc_suco = f"{qtd_suco} {tipo_recipiente}(s) de {unidade_medida} de suco de {sabor_suco.lower()} ({ponto_acucar.lower()})"
+                        
+                        st.session_state.carrinho_atual.append({
+                            "quantidade": qtd_suco,
+                            "item_principal": desc_suco,
+                            "detalhes": "",
+                            "preco": preco_total_suco
+                        })
+                        st.session_state.form_suco_key += 1
+                        st.success("✅ Suco Natural adicionado ao carrinho com sucesso!")
+                        st.rerun()
 
     else:
         st.markdown("### 🎙️ Fale ou Digite o seu Pedido Completo")
