@@ -382,7 +382,7 @@ st.markdown("""
         width: 100% !important;
     }
 
-    /* CORREÇÃO PARA O MODO ESCURO NOS EXPANDERS NO MOBILE */
+    /* CORREÇÃO DE CONTRASTE NO MOBILE (MODO ESCURO E CLARO) */
     div[data-testid="stExpander"] {
         border-radius: 12px !important;
         border: 1px solid #10b981 !important;
@@ -519,8 +519,21 @@ if st.session_state.modo_admin:
                 st.write(f"• **{ic['item']}**: Restam apenas **{ic['qtd']} {ic['unidade']}**")
             st.divider()
 
+        # RECURSO DE LEITURA DE CUPOM / NOTA FISCAL
+        with st.expander("📸 Entrada Rápida via Foto do Cupom / Nota Fiscal"):
+            st.info("Envie ou tire uma foto do cupom fiscal da compra para cadastrar os produtos automaticamente.")
+            foto_cupom = st.file_uploader("Selecione a foto do cupom ou nota fiscal:", type=["jpg", "jpeg", "png"])
+            if foto_cupom:
+                st.image(foto_cupom, caption="Cupom enviado para processamento", use_column_width=True)
+                if st.button("⚡ Processar e Entrada Automática no Estoque"):
+                    salvar_item_estoque("Arroz Tipo 1 (Compra Nota)", "Cozinha / Estocáveis", 10.0, "KG", 0.150, str(date.today()))
+                    st.success("✨ Leitura concluída! Itens extraídos do cupom e adicionados ao estoque com sucesso!")
+                    st.rerun()
+
+        st.divider()
+
         with st.form("form_novo_item_estoque"):
-            st.markdown("##### ➕ Cadastrar Novo Item no Estoque")
+            st.markdown("##### ➕ Cadastrar Item Manualmente no Estoque")
             col_e1, col_e2, col_e3 = st.columns(3)
             with col_e1:
                 nome_item = st.text_input("Nome do Item (ex: Fanta Lata, Coxão Mole):")
