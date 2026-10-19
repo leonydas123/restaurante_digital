@@ -418,8 +418,8 @@ if "modo_admin" not in st.session_state:
 if "form_refeicao_key" not in st.session_state:
     st.session_state.form_refeicao_key = 0
 
-if "form_suco_key" not in st.session_state:
-    st.session_state.form_suco_key = 0
+if "form_bebida_key" not in st.session_state:
+    st.session_state.form_bebida_key = 0
 
 menu_diario = carregar_config("menu_diario")
 precos_sucos = carregar_config("precos_sucos")
@@ -652,13 +652,11 @@ else:
         st.markdown("### 🥗 1️⃣ Monte a sua Refeição")
         k = st.session_state.form_refeicao_key
 
-        # CRUZAMENTO: Pega as carnes configuradas no Cardápio do Dia e verifica disponibilidade no Rendimento
         carnes_cardapio_config = menu_diario.get("carnes", [])
         carnes_rend_cliente = carregar_carnes_rendimento()
         
         carnes_disponiveis_cardapio = []
         for carne_nome in carnes_cardapio_config:
-            # Encontrar saldo correspondente na tabela de rendimento de carnes
             encontrada = False
             for c in carnes_rend_cliente:
                 if c['nome_carne'].strip().lower() == carne_nome.strip().lower():
@@ -666,7 +664,6 @@ else:
                         carnes_disponiveis_cardapio.append(carne_nome)
                     encontrada = True
                     break
-            # Se a carne está no cardápio mas não tem registro de rendimento, permite com aviso ou considera disponível
             if not encontrada:
                 carnes_disponiveis_cardapio.append(carne_nome)
 
@@ -721,6 +718,7 @@ else:
         if not refris_outros:
             st.info("Nenhum refrigerante ou bebida disponível no momento.")
         else:
+            kb = st.session_state.form_bebida_key
             cols_grid = st.columns(3)
             for idx, r in enumerate(refris_outros):
                 col_target = cols_grid[idx % 3]
@@ -731,9 +729,10 @@ else:
                     st.write(f"Preço: **R$ {r['preco_unitario']:.2f}**")
                     st.write(f"Disponível: **{int(r['qtd'])} un**")
                     
-                    qtd_comprar = st.number_input("Qtd:", min_value=0, max_value=int(r['qtd']), value=0, step=1, key=f"grid_qtd_{r['id']}")
+                    # Chave dinâmica baseada em `kb` para resetar para 0 após adicionar
+                    qtd_comprar = st.number_input("Qtd:", min_value=0, max_value=int(r['qtd']), value=0, step=1, key=f"grid_qtd_{r['id']}_{kb}")
                     
-                    if st.button(f"Adicionar", key=f"btn_add_bev_{r['id']}"):
+                    if st.button(f"Adicionar", key=f"btn_add_bev_{r['id']}_{kb}"):
                         if not nome_cliente or not telefone_cliente:
                             st.error("Preencha seu Nome e Telefone.")
                         elif qtd_comprar <= 0:
@@ -747,6 +746,7 @@ else:
                                 "preco": float(r['preco_unitario']) * qtd_comprar,
                                 "item_estoque_nome": r['item']
                             })
+                            st.session_state.form_bebida_key += 1
                             st.success(f"✅ {qtd_comprar}x {r['item']} adicionado!")
                             st.rerun()
                 st.markdown("---")
@@ -787,7 +787,7 @@ else:
         
         st.divider()
         forma_pagamento = st.selectbox("Forma de Pagamento:", ["Pix", "Dinheiro", "Cartão na Retirada"])
-        info_formal = st.selectbox("Deseja informação formal / nota?", ["Não", "Sim"])
+        info_formal = st.selectbox("Deseja informação formal / nota?", ["Non", "Sim"])
 
         if st.button("🚀 Finalizar e Enviar Pedido via WhatsApp", type="primary"):
             if not nome_cliente or not telefone_cliente:
