@@ -262,13 +262,6 @@ def salvar_carne_rendimento(nome_carne, quilos, gramas_porc, data_reg):
     conn.commit()
     conn.close()
 
-def deletar_carne_rendimento(id_c):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM rendimento_carnes WHERE id = ?", (id_c,))
-    conn.commit()
-    conn.close()
-
 def carregar_cupons():
     conn = get_db_connection()
     df = pd.read_sql_query("SELECT * FROM cupons_gastos ORDER BY id DESC", conn)
@@ -420,6 +413,9 @@ if "form_refeicao_key" not in st.session_state:
 
 if "form_bebida_key" not in st.session_state:
     st.session_state.form_bebida_key = 0
+
+if "form_suco_key" not in st.session_state:
+    st.session_state.form_suco_key = 0
 
 menu_diario = carregar_config("menu_diario")
 precos_sucos = carregar_config("precos_sucos")
@@ -710,13 +706,19 @@ else:
                     st.rerun()
 
         st.divider()
-        st.markdown("### 🥤 2️⃣ Bebidas e Refrigerantes (Tabela em Grade)")
+        st.markdown("### 🥤 2️⃣ Bebidas e Refrigerantes")
         
+        # Barra de Pesquisa de Bebidas
+        termo_busca = st.text_input("🔍 Pesquisar refrigerante, suco ou bebida...", key="busca_bebida_cliente").lower()
+
         estoque_cliente = carregar_estoque()
         refris_outros = [i for i in estoque_cliente if i["categoria"] == "Bebidas" and i["qtd"] > 0]
 
+        if termo_busca:
+            refris_outros = [i for i in refris_outros if termo_busca in i['item'].lower()]
+
         if not refris_outros:
-            st.info("Nenhum refrigerante ou bebida disponível no momento.")
+            st.info("Nenhuma bebida encontrada com esse termo.")
         else:
             kb = st.session_state.form_bebida_key
             cols_grid = st.columns(3)
@@ -729,7 +731,7 @@ else:
                     st.write(f"Preço: **R$ {r['preco_unitario']:.2f}**")
                     st.write(f"Disponível: **{int(r['qtd'])} un**")
                     
-                    # Chave dinâmica baseada em `kb` para resetar para 0 após adicionar
+                    # Quantidade com valor inicial 0 e key dinâmica para resetar após adicionar
                     qtd_comprar = st.number_input("Qtd:", min_value=0, max_value=int(r['qtd']), value=0, step=1, key=f"grid_qtd_{r['id']}_{kb}")
                     
                     if st.button(f"Adicionar", key=f"btn_add_bev_{r['id']}_{kb}"):
@@ -750,6 +752,37 @@ else:
                             st.success(f"✅ {qtd_comprar}x {r['item']} adicionado!")
                             st.rerun()
                 st.markdown("---")
+
+        # Seção de Sucos Naturais
+        st.markdown("### 🧃 3️⃣ Sucos Naturais (Copo ou Jarra)")
+        ks = st.session_state.form_suco_key
+        cols_suco = st.columns(2)
+        idx_s = 0
+        for chave_suco, preco_suco in precos_sucos.items():
+            col_target_s = cols_suco[idx_s % 2]
+            with col_target_s:
+                st.markdown(f"**{chave_suco}**")
+                st.write(f"Preço: **R$ {preco_suco:.2f}**")
+                qtd_suco = st.number_input("Qtd:", min_value=0, value=0, step=1, key=f"suco_qtd_{chave_suco}_{ks}")
+                
+                if st.button("Adicionar Suco", key=f"btn_add_suco_{chave_suco}_{ks}"):
+                    if not nome_cliente or not telefone_cliente:
+                        st.error("Preencha seu Nome e Telefone.")
+                    elif qtd_suco <= 0:
+                        st.error("Selecione quantidade maior que 0.")
+                    else:
+                        preco_total_suco = float(preco_suco) * qtd_suco
+                        st.session_state.carrinho_atual.append({
+                            "quantidade": qtd_suco,
+                            "item_principal": f"{qtd_suco}x Suco de {chave_suco}",
+                            "detalhes": "Suco Natural",
+                            "preco": preco_total_suco
+                        })
+                        st.session_state.form_suco_key += 1
+                        st.success(f"✅ {qtd_suco}x {chave_suco} adicionado!")
+                        st.rerun()
+            idx_s += 1
+            st.markdown("---")
 
     else:
         st.markdown("### 🎙️ Fale ou Digite o seu Pedido Completo")
@@ -787,7 +820,7 @@ else:
         
         st.divider()
         forma_pagamento = st.selectbox("Forma de Pagamento:", ["Pix", "Dinheiro", "Cartão na Retirada"])
-        info_formal = st.selectbox("Deseja informação formal / nota?", ["Non", "Sim"])
+        info_formal = st.selectbox("Deseja informação formal / nota?", ["Não", "Sim"])
 
         if st.button("🚀 Finalizar e Enviar Pedido via WhatsApp", type="primary"):
             if not nome_cliente or not telefone_cliente:
