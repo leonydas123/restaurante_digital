@@ -57,7 +57,6 @@ def init_db():
         )
     """)
 
-    # Garantir colunas novas caso a tabela já exista
     try:
         cursor.execute("ALTER TABLE estoque ADD COLUMN ordem INTEGER DEFAULT 99")
     except sqlite3.OperationalError:
@@ -276,84 +275,17 @@ def carregar_cupons():
     conn.close()
     return df.to_dict("records")
 
-def verificar_cupom_processado(hash_val):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM cupons_gastos WHERE hash_cupom = ?", (hash_val,))
-    count = cursor.fetchone()[0]
-    conn.close()
-    return count > 0
-
-def salvar_cupom_item(data_gasto, produto, qtd, preco, uso_pessoal, hash_val):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO cupons_gastos (data, produto, quantidade, preco, uso_pessoal, hash_cupom) VALUES (?, ?, ?, ?, ?, ?)",
-                   (str(data_gasto), produto, qtd, preco, 1 if uso_pessoal else 0, hash_val))
-    conn.commit()
-    conn.close()
-
-def atualizar_status_uso_pessoal(id_cupom, val):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE cupons_gastos SET uso_pessoal = ? WHERE id = ?", (1 if val else 0, id_cupom))
-    conn.commit()
-    conn.close()
-
-def deletar_cupom_item(id_cupom):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM cupons_gastos WHERE id = ?", (id_cupom,))
-    conn.commit()
-    conn.close()
-
-def apagar_todos_cupons():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM cupons_gastos")
-    conn.commit()
-    conn.close()
-
 def carregar_fornecedores():
     conn = get_db_connection()
     df = pd.read_sql_query("SELECT * FROM fornecedores ORDER BY id DESC", conn)
     conn.close()
     return df.to_dict("records")
 
-def salvar_fornecedor(nome, telefone, categoria, obs):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO fornecedores (nome, telefone, categoria, observacao) VALUES (?, ?, ?, ?)",
-                   (nome, telefone, categoria, obs))
-    conn.commit()
-    conn.close()
-
-def deletar_fornecedor(id_forn):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM fornecedores WHERE id = ?", (id_forn,))
-    conn.commit()
-    conn.close()
-
 def carregar_donos():
     conn = get_db_connection()
     df = pd.read_sql_query("SELECT * FROM donos ORDER BY id DESC", conn)
     conn.close()
     return df.to_dict("records")
-
-def salvar_dono(nome, cargo, contato, obs):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO donos (nome, cargo, contato, observacoes) VALUES (?, ?, ?, ?)",
-                   (nome, cargo, contato, obs))
-    conn.commit()
-    conn.close()
-
-def deletar_dono(id_dono):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM donos WHERE id = ?", (id_dono,))
-    conn.commit()
-    conn.close()
 
 def carregar_pedidos():
     conn = get_db_connection()
@@ -720,9 +652,24 @@ else:
         st.markdown("### 🥗 1️⃣ Monte a sua Refeição")
         k = st.session_state.form_refeicao_key
 
+        # CRUZAMENTO: Pega as carnes configuradas no Cardápio do Dia e verifica disponibilidade no Rendimento
+        carnes_cardapio_config = menu_diario.get("carnes", [])
         carnes_rend_cliente = carregar_carnes_rendimento()
-        carnes_disponiveis_cardapio = [c['nome_carne'] for c in carnes_rend_cliente if float(c['qtd_atual_disponivel']) > 0]
         
+        carnes_disponiveis_cardapio = []
+        for carne_nome in carnes_cardapio_config:
+            # Encontrar saldo correspondente na tabela de rendimento de carnes
+            encontrada = False
+            for c in carnes_rend_cliente:
+                if c['nome_carne'].strip().lower() == carne_nome.strip().lower():
+                    if float(c['qtd_atual_disponivel']) > 0:
+                        carnes_disponiveis_cardapio.append(carne_nome)
+                    encontrada = True
+                    break
+            # Se a carne está no cardápio mas não tem registro de rendimento, permite com aviso ou considera disponível
+            if not encontrada:
+                carnes_disponiveis_cardapio.append(carne_nome)
+
         if not carnes_disponiveis_cardapio:
             carnes_disponiveis_cardapio = ["Indisponível"]
 
@@ -774,7 +721,6 @@ else:
         if not refris_outros:
             st.info("Nenhum refrigerante ou bebida disponível no momento.")
         else:
-            # Organizar em colunas de grade (tabela visual)
             cols_grid = st.columns(3)
             for idx, r in enumerate(refris_outros):
                 col_target = cols_grid[idx % 3]
@@ -812,7 +758,7 @@ else:
             if not nome_cliente or not telefone_cliente:
                 st.error("Preencha Nome e Telefone.")
             else:
-                for item_det in processar_fala_inteligente(texto_fala, float(menu_diario["preco_marmita"], precos_sucos)):
+                for item_det in processar_fala_inteligente(texto_fala, float(menu_diario["preco_marmita"]), precos_sucos):
                     st.session_state.carrinho_atual.append(item_det)
                 st.success("Pedido inteligente adicionado!")
                 st.rerun()
